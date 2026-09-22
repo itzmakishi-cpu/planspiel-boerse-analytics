@@ -178,7 +178,7 @@ else:
     dist_to_support_pct = ((latest_close - support_level) / support_level) * 100
 
     # ---------------------------------------------------------
-    # DYNAMISCHES Y-ACHSEN PADDING (Hält die Linie perfekt mittig)
+    # DYNAMISCHES Y-ACHSEN PADDING
     # ---------------------------------------------------------
     y_min = df['Low'].min()
     y_max = df['High'].max()
@@ -198,10 +198,10 @@ else:
             name="Kurs", increasing_line_color='#26a69a', decreasing_line_color='#ef5350'
         ), row=1, col=1)
     else:
-        # Cleane Linie mit dynamischer Segment-Farbe (Grün/Rot je Candle)
+        # Cleane Linie mit dynamischer Segment-Farbe (Verwendung von .values verhindert KeyError)
         x_coords = df.index
-        y_coords = df['Close']
-        is_up_candle = df['Close'] >= df['Open']
+        y_coords = df['Close'].values
+        is_up_candle = (df['Close'] >= df['Open']).values
 
         x_green, y_green = [], []
         x_red, y_red = [], []
@@ -210,7 +210,7 @@ else:
             p1_x, p1_y = x_coords[i-1], y_coords[i-1]
             p2_x, p2_y = x_coords[i], y_coords[i]
             
-            if is_up_candle.iloc[i]:
+            if is_up_candle[i]:
                 x_green.extend([p1_x, p2_x, None])
                 y_green.extend([p1_y, p2_y, None])
             else:
@@ -259,7 +259,7 @@ else:
         hovermode="x unified",
         paper_bgcolor='rgba(0,0,0,0)',
         plot_bgcolor='rgba(0,0,0,0)',
-        dragmode=False  # Sperrt Interaktion für flüssiges App-Scrolling
+        dragmode=False
     )
 
     fig.update_xaxes(fixedrange=True, showgrid=False)
