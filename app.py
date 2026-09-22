@@ -1,344 +1,175 @@
 import streamlit as st
 import yfinance as yf
+import plotly.graph_objects as go
+from plotly.subplots import make_subplots
 import pandas as pd
 import numpy as np
-import plotly.graph_objects as go
+
+# Seiten-Layout konfigurieren
+st.set_page_config(page_title="Aktien-Analyse Dashboard", layout="wide")
+
+st.title("📈 Professionelles Aktien-Analyse-Dashboard")
 
 # ---------------------------------------------------------
-# PAGE CONFIGURATION (MUSS ZUERST AUFGERUFEN WERDEN)
+# SIDEBAR: EINSTELLUNGEN
 # ---------------------------------------------------------
-st.set_page_config(
-    page_title="PLANSPIEL BÖRSE ANALYTICS",
-    layout="centered",
-    initial_sidebar_state="collapsed"
-)
+st.sidebar.header("Einstellungen")
 
-# ---------------------------------------------------------
-# FUTURISTIC CUSTOM CSS (CLEAN DARK LOOK)
-# ---------------------------------------------------------
-st.markdown("""
-<style>
-    /* Dark Theme Core */
-    .stApp {
-        background-color: #060911;
-        color: #e2e8f0;
-        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-    }
-    
-    /* Global Elements hiding (Macht es zur "App") */
-    #MainMenu, footer, header { visibility: hidden; }
-    
-    /* Header Card */
-    .header-card {
-        background: linear-gradient(180deg, #0f172a 0%, #080d1a 100%);
-        border: 1px solid #1e293b;
-        border-radius: 14px;
-        padding: 16px;
-        text-align: center;
-        margin-bottom: 16px;
-        box-shadow: 0 4px 20px rgba(0, 242, 254, 0.05);
-    }
-    .header-title {
-        font-size: 1.2rem;
-        font-weight: 800;
-        letter-spacing: 3px;
-        color: #38bdf8;
-        text-transform: uppercase;
-        margin: 0;
-    }
-    .header-subtitle {
-        font-size: 0.7rem;
-        color: #64748b;
-        letter-spacing: 1.5px;
-        margin-top: 4px;
-    }
+# 1. Jede Aktie suchen/eingeben
+ticker_input = st.sidebar.text_input(
+    "Ticker-Symbol eingeben:", 
+    value="AAPL",
+    help="Gib ein beliebiges Symbol ein (z. B. AAPL, NVDA, TSLA, MSFT oder SAP.DE für deutsche Aktien)."
+).upper().strip()
 
-    /* Metric Cards Grid */
-    .metric-grid {
-        display: grid;
-        grid-template-columns: repeat(2, 1fr);
-        gap: 10px;
-        margin-bottom: 16px;
-    }
-    .metric-card {
-        background: #0d1322;
-        border: 1px solid #1e293b;
-        border-radius: 12px;
-        padding: 12px;
-    }
-    .metric-label {
-        font-size: 0.65rem;
-        color: #64748b;
-        text-transform: uppercase;
-        letter-spacing: 1px;
-    }
-    .metric-value {
-        font-size: 1.1rem;
-        font-weight: 700;
-        color: #f8fafc;
-        margin-top: 2px;
-    }
-
-    /* Status Badges */
-    .badge {
-        display: inline-block;
-        padding: 3px 8px;
-        border-radius: 4px;
-        font-size: 0.65rem;
-        font-weight: 700;
-        letter-spacing: 1px;
-        text-transform: uppercase;
-    }
-    .badge-bull { background-color: rgba(16, 185, 129, 0.15); color: #10b981; border: 1px solid #10b981; }
-    .badge-bear { background-color: rgba(239, 68, 68, 0.15); color: #ef4444; border: 1px solid #ef4444; }
-    .badge-neu  { background-color: rgba(245, 158, 11, 0.15); color: #f59e0b; border: 1px solid #f59e0b; }
-
-    /* Erklär-Bär Analytics Box */
-    .analysis-card {
-        background: linear-gradient(135deg, #0b1329 0%, #111827 100%);
-        border: 1px solid #3b82f6;
-        border-radius: 14px;
-        padding: 16px;
-        margin-top: 16px;
-        margin-bottom: 16px;
-    }
-    .analysis-title {
-        font-size: 0.8rem;
-        font-weight: 800;
-        color: #60a5fa;
-        letter-spacing: 2px;
-        text-transform: uppercase;
-        margin-bottom: 10px;
-        border-bottom: 1px solid #1e293b;
-        padding-bottom: 6px;
-    }
-    .analysis-p {
-        font-size: 0.82rem;
-        line-height: 1.5;
-        color: #cbd5e1;
-        margin-bottom: 10px;
-    }
-
-    /* Signal Bar Container */
-    .signal-container {
-        background: #090e1a;
-        border: 1px solid #1e293b;
-        border-radius: 10px;
-        padding: 12px;
-        margin-bottom: 16px;
-    }
-</style>
-""", unsafe_allow_html=True)
-
-# ---------------------------------------------------------
-# WATCHLIST DEFINITION
-# ---------------------------------------------------------
-WATCHLIST = {
-    "SAP SE (DAX)": "SAP.DE",
-    "NVIDIA Corp (US)": "NVDA",
-    "Apple Inc (US)": "AAPL",
-    "Microsoft (US)": "MSFT",
-    "Rheinmetall AG (DAX)": "RHM.DE",
-    "Tesla Inc (US)": "TSLA",
-    "Adidas AG (DAX)": "ADS.DE",
-    "Deutsche Bank (DAX)": "DBK.DE",
-    "Amazon.com (US)": "AMZN",
-    "Allianz SE (DAX)": "ALV.DE"
+# 2. Zeiträume definieren (1 Tag, 1 Woche, 1 Monat, 1 Jahr, 3 Jahre)
+timeframe_options = {
+    "1 Tag": ("1d", "5m"),
+    "1 Woche": ("5d", "15m"),
+    "1 Monat": ("1mo", "1d"),
+    "1 Jahr": ("1y", "1d"),
+    "3 Jahre": ("3y", "1wk")
 }
 
-# ---------------------------------------------------------
-# HEADER COMPONENT
-# ---------------------------------------------------------
-st.markdown("""
-<div class="header-card">
-    <div class="header-title">Planspiel Analytics</div>
-    <div class="header-subtitle">SYSTEM // QUANT-ANALYSIS TOOL</div>
-</div>
-""", unsafe_allow_html=True)
+selected_tf = st.sidebar.radio("Zeitraum wählen:", list(timeframe_options.keys()), index=3)
+period, interval = timeframe_options[selected_tf]
 
 # ---------------------------------------------------------
-# USER INPUTS (MOBILE OPTIMIZED)
+# DATEN LADEN & VERARBEITEN
 # ---------------------------------------------------------
-selected_name = st.selectbox(
-    "AK TIE WÄHLEN",
-    options=list(WATCHLIST.keys()),
-    label_visibility="collapsed"
-)
-ticker_symbol = WATCHLIST[selected_name]
+if ticker_input:
+    try:
+        stock = yf.Ticker(ticker_input)
+        df = stock.history(period=period, interval=interval)
 
-period = st.radio(
-    "ZEITRAUM",
-    options=["1M", "3M", "6M", "1Y"],
-    horizontal=True,
-    label_visibility="collapsed"
-)
+        if df.empty:
+            st.error(f"Keine Daten für '{ticker_input}' gefunden. Überprüfe das Ticker-Symbol.")
+        else:
+            # Unternehmensname abrufen
+            info = stock.info
+            company_name = info.get('longName', ticker_input)
 
-period_map = {"1M": "1mo", "3M": "3mo", "6M": "6mo", "1Y": "1y"}
+            st.subheader(f"{company_name} ({ticker_input}) — Zeitraum: {selected_tf}")
 
-# ---------------------------------------------------------
-# DATA FETCHING (ROBUST METHOD)
-# ---------------------------------------------------------
-@st.cache_data(ttl=300)
-def load_stock_data(ticker, p_str):
-    ticker_obj = yf.Ticker(ticker)
-    df = ticker_obj.history(period=p_str)
-    return df
+            # Indikatoren berechnen: SMA 20 & SMA 50
+            df['SMA_20'] = df['Close'].rolling(window=20).mean()
+            df['SMA_50'] = df['Close'].rolling(window=50).mean()
 
-try:
-    df = load_stock_data(ticker_symbol, period_map[period])
+            # Relative Strength Index (RSI) berechnen
+            delta = df['Close'].diff()
+            gain = (delta.where(delta > 0, 0)).rolling(window=14).mean()
+            loss = (-delta.where(delta < 0, 0)).rolling(window=14).mean()
+            rs = gain / loss
+            df['RSI'] = 100 - (100 / (1 + rs))
 
-    if df.empty or len(df) < 14:
-        st.error("SYSTEMFEHLER: ZU WENIG DATENPUNKTE. BITTE SPÄTER ERNEUT VERSUCHEN.")
-        st.stop()
+            # Key Performance Indicators (KPIs)
+            latest_close = df['Close'].iloc[-1]
+            first_close = df['Close'].iloc[0]
+            price_change = latest_close - first_close
+            pct_change = (price_change / first_close) * 100
 
-    # Berechnungen
-    latest_price = float(df["Close"].iloc[-1])
-    prev_price = float(df["Close"].iloc[-2])
-    change_pct = ((latest_price - prev_price) / prev_price) * 100
+            m1, m2, m3, m4 = st.columns(4)
+            m1.metric("Aktueller Kurs", f"{latest_close:.2f} USD")
+            m2.metric("Veränderung im Zeitraum", f"{price_change:+.2f} USD", f"{pct_change:+.2f}%")
+            m3.metric("Höchstkurs", f"{df['High'].max():.2f} USD")
+            m4.metric("Tiefstkurs", f"{df['Low'].min():.2f} USD")
 
-    # Indikatoren
-    df["EMA50"] = df["Close"].ewm(span=min(50, len(df)), adjust=False).mean()
-    
-    # RSI (14) - Fehlerfrei kalkuliert
-    delta = df["Close"].diff()
-    gain = delta.clip(lower=0).rolling(window=14, min_periods=1).mean()
-    loss = (-delta.clip(upper=0)).rolling(window=14, min_periods=1).mean()
-    rs = gain / loss
-    df["RSI"] = np.where(loss == 0, 100, 100 - (100 / (1 + rs)))
-    current_rsi = float(df["RSI"].iloc[-1])
+            # ---------------------------------------------------------
+            # 3. ERWEITERTE GRAFIK (Candlestick + Moving Averages + Volumen)
+            # ---------------------------------------------------------
+            fig = make_subplots(
+                rows=2, cols=1, 
+                shared_xaxes=True, 
+                vertical_spacing=0.08, 
+                row_heights=[0.75, 0.25],
+                subplot_titles=("Kursverlauf (Kerzenchart) mit Durchschnitten", "Handelsvolumen")
+            )
 
-    # Volatilität
-    returns = df["Close"].pct_change()
-    volatility = float(returns.tail(20).std() * np.sqrt(252) * 100)
+            # Candlestick Chart
+            fig.add_trace(go.Candlestick(
+                x=df.index,
+                open=df['Open'], high=df['High'],
+                low=df['Low'], close=df['Close'],
+                name="Kurs (OHLC)"
+            ), row=1, col=1)
 
-    # Signal Score (0 - 100)
-    score = 50
-    if latest_price > df["EMA50"].iloc[-1]: score += 20
-    else: score -= 20
-    
-    if current_rsi < 30: score += 20
-    elif current_rsi > 70: score -= 20
-    
-    if change_pct > 0: score += 10
-    else: score -= 10
-    
-    score = max(5, min(95, score))
+            # Gleitende Durchschnitte hinzufügen
+            fig.add_trace(go.Scatter(
+                x=df.index, y=df['SMA_20'], mode='lines', name='SMA 20 (Kurzfristig)',
+                line=dict(color='orange', width=1.5)
+            ), row=1, col=1)
 
-    # ---------------------------------------------------------
-    # DISPLAY METRICS
-    # ---------------------------------------------------------
-    badge_class = "badge-bull" if change_pct >= 0 else "badge-bear"
-    change_sign = "+" if change_pct >= 0 else ""
-    
-    rsi_badge_class = "badge-bear" if current_rsi > 70 else "badge-bull" if current_rsi < 30 else "badge-neu"
-    rsi_text = "ÜBERKAUFT" if current_rsi > 70 else "ÜBERVERKAUFT" if current_rsi < 30 else "NEUTRAL"
+            fig.add_trace(go.Scatter(
+                x=df.index, y=df['SMA_50'], mode='lines', name='SMA 50 (Mittelfristig)',
+                line=dict(color='deepskyblue', width=1.5)
+            ), row=1, col=1)
 
-    st.markdown(f"""
-    <div class="metric-grid">
-        <div class="metric-card">
-            <div class="metric-label">KURS</div>
-            <div class="metric-value">{latest_price:.2f}</div>
-            <div style="margin-top:4px;"><span class="badge {badge_class}">{change_sign}{change_pct:.2f}%</span></div>
-        </div>
-        <div class="metric-card">
-            <div class="metric-label">RSI (14)</div>
-            <div class="metric-value">{current_rsi:.1f}</div>
-            <div style="margin-top:4px;"><span class="badge {rsi_badge_class}">{rsi_text}</span></div>
-        </div>
-    </div>
-    """, unsafe_allow_html=True)
+            # Volumen Chart mit Farbkodierung (Grün/Rot)
+            volume_colors = ['#26a69a' if df['Close'].iloc[i] >= df['Open'].iloc[i] else '#ef5350' for i in range(len(df))]
+            fig.add_trace(go.Bar(
+                x=df.index, y=df['Volume'], name="Volumen", marker_color=volume_colors
+            ), row=2, col=1)
 
-    # ---------------------------------------------------------
-    # SIGNAL METER
-    # ---------------------------------------------------------
-    signal_text = "STARKES KAUFSIGNAL" if score >= 70 else "VERKAUFSIGNAL" if score <= 30 else "NEUTRAL / HALTEN"
-    signal_color = "#10b981" if score >= 70 else "#ef4444" if score <= 30 else "#f59e0b"
+            # Style-Anpassungen
+            fig.update_layout(
+                height=650,
+                template="plotly_dark",
+                xaxis_rangeslider_visible=False,
+                showlegend=True,
+                margin=dict(l=20, r=20, t=40, b=20)
+            )
 
-    st.markdown(f"""
-    <div class="signal-container">
-        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
-            <span class="metric-label">QUANT SIGNAL SCORE</span>
-            <span style="font-size:0.75rem; font-weight:800; color:{signal_color};">{signal_text} ({score}/100)</span>
-        </div>
-        <div style="background:#1e293b; height:8px; border-radius:4px; width:100%; overflow:hidden;">
-            <div style="background:{signal_color}; width:{score}%; height:100%; border-radius:4px;"></div>
-        </div>
-    </div>
-    """, unsafe_allow_html=True)
+            st.plotly_chart(fig, use_container_width=True)
 
-    # ---------------------------------------------------------
-    # MOBILE INTERACTIVE CHART
-    # ---------------------------------------------------------
-    fig = go.Figure()
+            # ---------------------------------------------------------
+            # 4. KAUFEINSCHÄTZUNG & BEGRÜNDUNG
+            # ---------------------------------------------------------
+            st.markdown("### 💡 Signal-Analyse & Begründung")
 
-    fig.add_trace(go.Candlestick(
-        x=df.index,
-        open=df['Open'],
-        high=df['High'],
-        low=df['Low'],
-        close=df['Close'],
-        name='Kurs',
-        increasing_line_color='#00f2fe',
-        decreasing_line_color='#ff1744'
-    ))
+            latest_rsi = df['RSI'].iloc[-1] if not np.isnan(df['RSI'].iloc[-1]) else 50
+            latest_sma20 = df['SMA_20'].iloc[-1]
+            latest_sma50 = df['SMA_50'].iloc[-1]
 
-    fig.add_trace(go.Scatter(
-        x=df.index,
-        y=df['EMA50'],
-        mode='lines',
-        name='EMA 50',
-        line=dict(color='#f59e0b', width=1.5)
-    ))
+            reasons = []
+            score = 0  # Punktesystem für Kaufsignal
 
-    fig.update_layout(
-        template="plotly_dark",
-        paper_bgcolor='rgba(0,0,0,0)',
-        plot_bgcolor='#090e1a',
-        margin=dict(l=5, r=5, t=10, b=10),
-        height=280,
-        showlegend=False,
-        xaxis=dict(showgrid=False, rangeslider=dict(visible=False)),
-        yaxis=dict(showgrid=True, gridcolor='#1e293b', side='right')
-    )
+            # 1. Kriterium: Trend gegenüber SMA 20
+            if latest_close > latest_sma20:
+                reasons.append("🟢 **Positiver Kurzfrist-Trend:** Der aktuelle Kurs liegt über dem 20-Tage-Durchschnitt (SMA 20).")
+                score += 1
+            else:
+                reasons.append("🔴 **Negativer Kurzfrist-Trend:** Der Kurs liegt unter dem 20-Tage-Durchschnitt (SMA 20), was auf Abwärtsdruck hinweist.")
+                score -= 1
 
-    # Konfiguration: Deaktiviert die Toolbar für echtes App-Feeling auf dem Handy
-    st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False})
+            # 2. Kriterium: Trend gegenüber SMA 50
+            if latest_close > latest_sma50:
+                reasons.append("🟢 **Starke Basis:** Der Kurs behauptet sich über dem 50-Tage-Durchschnitt (SMA 50).")
+                score += 1
+            else:
+                reasons.append("🔴 **Schwächephase:** Der Kurs verharrt unter dem 50-Tage-Durchschnitt (SMA 50).")
+                score -= 1
 
-    # ---------------------------------------------------------
-    # ERKLÄR-BÄR ENGINE
-    # ---------------------------------------------------------
-    trend_state = "über" if latest_price > df["EMA50"].iloc[-1] else "unter"
-    trend_desc = "Aufwärtstrend" if latest_price > df["EMA50"].iloc[-1] else "Abwärtstrend"
-    
-    if current_rsi > 70:
-        rsi_explanation = "Der RSI-Wert ist über 70. Die Aktie ist aktuell heißgelaufen (überkauft). Kurzfristige Gewinnmitnahmen durch andere Marktteilnehmer sind sehr wahrscheinlich."
-    elif current_rsi < 30:
-        rsi_explanation = "Der RSI-Wert ist unter 30. Die Aktie wurde stark abverkauft (überverkauft). Dies ist oft eine Chance für eine kurzfristige technische Gegenbewegung nach oben."
-    else:
-        rsi_explanation = "Der RSI befindet sich im neutralen Bereich (30-70). Der Markt agiert derzeit ausgeglichen ohne extreme Panik oder Gier."
+            # 3. Kriterium: RSI (Overbought/Oversold)
+            if latest_rsi < 30:
+                reasons.append(f"🟢 **Überverkauft (RSI = {latest_rsi:.1f}):** Der Relative-Stärke-Index liegt unter 30. Die Aktie ist historisch günstig/überverkauft – oft Gegenbewegung nach oben möglich.")
+                score += 1.5
+            elif latest_rsi > 70:
+                reasons.append(f"🔴 **Überkauft (RSI = {latest_rsi:.1f}):** Der RSI liegt über 70. Die Aktie ist stark gestiegen – erhöhtes Risiko für Gewinnmitnahmen/Rücksetzer.")
+                score -= 1.5
+            else:
+                reasons.append(f"⚪ **Neutraler RSI (RSI = {latest_rsi:.1f}):** Der Momentum-Indikator liegt im ausgeglichenen Bereich (zwischen 30 und 70).")
 
-    if volatility > 35:
-        planspiel_tip = "HOHE VOLATILITÄT: Diese Aktie schwankt massiv. Für das Planspiel Börse bietet dies die Chance auf sehr schnelle Renditen, birgt jedoch das Risiko, das Startkapital rasant zu verbrennen. Taktischer Einsatz empfohlen."
-    else:
-        planspiel_tip = "SOLIDE VOLATILITÄT: Ein vergleichsweise stabiler Wert. Ideal geeignet als sicheres Fundament für dein Planspiel-Depot, um konstantes Wachstum ohne extreme Risiken zu erzielen."
+            # Fazit ausgeben
+            if score >= 1.5:
+                st.success("**Gesamteinschätzung: KAUFEN / BULLISCH**")
+            elif score <= -1.5:
+                st.error("**Gesamteinschätzung: VERKAUFEN / BÄRISCH**")
+            else:
+                st.warning("**Gesamteinschätzung: HALTEN / NEUTRAL**")
 
-    st.markdown(f"""
-    <div class="analysis-card">
-        <div class="analysis-title">SYSTEMANALYSE // LERN-MODUL</div>
-        
-        <div class="analysis-p">
-            <strong>TREND-DETEKTION:</strong> Die Aktie notiert aktuell <strong>{trend_state}</strong> ihrem gleitenden 50-Tage-Durchschnitt (EMA 50). Dies bestätigt mathematisch einen übergeordneten <strong>{trend_desc}</strong>.
-        </div>
-        
-        <div class="analysis-p">
-            <strong>MARKTDYNAMIK (RSI):</strong> {rsi_explanation}
-        </div>
-        
-        <div class="analysis-p">
-            <strong>PLANSPIEL-TAKTIK:</strong> {planspiel_tip}
-        </div>
-    </div>
-    """, unsafe_allow_html=True)
+            st.write("**Warum dieses Ergebnis?**")
+            for r in reasons:
+                st.markdown(f"- {r}")
 
-except Exception as e:
-    st.error("VERBINDUNGSFEHLER ZUR BÖRSE. BITTE NEU LADEN.")
+    except Exception as e:
+        st.error(f"Ein Fehler ist aufgetreten: {e}")
