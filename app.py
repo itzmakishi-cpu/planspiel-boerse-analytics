@@ -8,21 +8,40 @@ import numpy as np
 # Seiten-Layout konfigurieren
 st.set_page_config(page_title="Aktien-Analyse Dashboard", layout="wide")
 
-st.title("📈 Professionelles Aktien-Analyse-Dashboard")
+st.title("Aktien-Analyse Dashboard")
 
 # ---------------------------------------------------------
 # SIDEBAR: EINSTELLUNGEN
 # ---------------------------------------------------------
 st.sidebar.header("Einstellungen")
 
-# 1. Jede Aktie suchen/eingeben
-ticker_input = st.sidebar.text_input(
-    "Ticker-Symbol eingeben:", 
-    value="AAPL",
-    help="Gib ein beliebiges Symbol ein (z. B. AAPL, NVDA, TSLA, MSFT oder SAP.DE für deutsche Aktien)."
-).upper().strip()
+# 1. Vordefinierte Aktienliste zur einfachen Auswahl
+STOCK_DICT = {
+    "NVIDIA Corporation (NVDA)": "NVDA",
+    "Apple Inc. (AAPL)": "AAPL",
+    "Microsoft Corporation (MSFT)": "MSFT",
+    "Tesla, Inc. (TSLA)": "TSLA",
+    "Amazon.com Inc. (AMZN)": "AMZN",
+    "Alphabet / Google (GOOGL)": "GOOGL",
+    "Meta Platforms (META)": "META",
+    "SAP SE (SAP.DE)": "SAP.DE",
+    "Siemens AG (SIE.DE)": "SIE.DE",
+    "Allianz SE (ALV.DE)": "ALV.DE",
+    "Deutsche Telekom (DTE.DE)": "DTE.DE",
+    "BMW AG (BMW.DE)": "BMW.DE",
+    "Mercedes-Benz Group (MBG.DE)": "MBG.DE",
+    "Volkswagen AG (VOW3.DE)": "VOW3.DE",
+    "-- Eigene Eingabe --": "CUSTOM"
+}
 
-# 2. Zeiträume definieren (1 Tag, 1 Woche, 1 Monat, 1 Jahr, 3 Jahre)
+selected_stock_label = st.sidebar.selectbox("Aktie auswählen:", list(STOCK_DICT.keys()))
+
+if STOCK_DICT[selected_stock_label] == "CUSTOM":
+    ticker_input = st.sidebar.text_input("Manuelles Symbol eingeben (z. B. AMD):", value="AMD").upper().strip()
+else:
+    ticker_input = STOCK_DICT[selected_stock_label]
+
+# 2. Zeiträume definieren
 timeframe_options = {
     "1 Tag": ("1d", "5m"),
     "1 Woche": ("5d", "15m"),
@@ -43,26 +62,25 @@ if ticker_input:
         df = stock.history(period=period, interval=interval)
 
         if df.empty:
-            st.error(f"Keine Daten für '{ticker_input}' gefunden. Überprüfe das Ticker-Symbol.")
+            st.error(f"[FEHLER] Keine Daten für Symbol '{ticker_input}' gefunden.")
         else:
-            # Unternehmensname abrufen
             info = stock.info
             company_name = info.get('longName', ticker_input)
 
-            st.subheader(f"{company_name} ({ticker_input}) — Zeitraum: {selected_tf}")
+            st.subheader(f"{company_name} [{ticker_input}] — Zeitraum: {selected_tf}")
 
             # Indikatoren berechnen: SMA 20 & SMA 50
             df['SMA_20'] = df['Close'].rolling(window=20).mean()
             df['SMA_50'] = df['Close'].rolling(window=50).mean()
 
-            # Relative Strength Index (RSI) berechnen
+            # Relative Strength Index (RSI)
             delta = df['Close'].diff()
             gain = (delta.where(delta > 0, 0)).rolling(window=14).mean()
             loss = (-delta.where(delta < 0, 0)).rolling(window=14).mean()
             rs = gain / loss
             df['RSI'] = 100 - (100 / (1 + rs))
 
-            # Key Performance Indicators (KPIs)
+            # KPIs
             latest_close = df['Close'].iloc[-1]
             first_close = df['Close'].iloc[0]
             price_change = latest_close - first_close
@@ -75,14 +93,14 @@ if ticker_input:
             m4.metric("Tiefstkurs", f"{df['Low'].min():.2f} USD")
 
             # ---------------------------------------------------------
-            # 3. ERWEITERTE GRAFIK (Candlestick + Moving Averages + Volumen)
+            # 3. GRAFIK (Candlestick + Moving Averages + Volumen)
             # ---------------------------------------------------------
             fig = make_subplots(
                 rows=2, cols=1, 
                 shared_xaxes=True, 
                 vertical_spacing=0.08, 
                 row_heights=[0.75, 0.25],
-                subplot_titles=("Kursverlauf (Kerzenchart) mit Durchschnitten", "Handelsvolumen")
+                subplot_titles=("Kursverlauf (Candlestick) & Durchschnitte", "Handelsvolumen")
             )
 
             # Candlestick Chart
@@ -93,7 +111,7 @@ if ticker_input:
                 name="Kurs (OHLC)"
             ), row=1, col=1)
 
-            # Gleitende Durchschnitte hinzufügen
+            # SMA Lines
             fig.add_trace(go.Scatter(
                 x=df.index, y=df['SMA_20'], mode='lines', name='SMA 20 (Kurzfristig)',
                 line=dict(color='orange', width=1.5)
@@ -104,13 +122,13 @@ if ticker_input:
                 line=dict(color='deepskyblue', width=1.5)
             ), row=1, col=1)
 
-            # Volumen Chart mit Farbkodierung (Grün/Rot)
+            # Volumen Chart
             volume_colors = ['#26a69a' if df['Close'].iloc[i] >= df['Open'].iloc[i] else '#ef5350' for i in range(len(df))]
             fig.add_trace(go.Bar(
                 x=df.index, y=df['Volume'], name="Volumen", marker_color=volume_colors
             ), row=2, col=1)
 
-            # Style-Anpassungen
+            # Layout Styling
             fig.update_layout(
                 height=650,
                 template="plotly_dark",
@@ -122,54 +140,54 @@ if ticker_input:
             st.plotly_chart(fig, use_container_width=True)
 
             # ---------------------------------------------------------
-            # 4. KAUFEINSCHÄTZUNG & BEGRÜNDUNG
+            # 4. SIGNAL-ANALYSE & BEGRÜNDUNG
             # ---------------------------------------------------------
-            st.markdown("### 💡 Signal-Analyse & Begründung")
+            st.markdown("### Signal-Analyse & Begründung")
 
             latest_rsi = df['RSI'].iloc[-1] if not np.isnan(df['RSI'].iloc[-1]) else 50
             latest_sma20 = df['SMA_20'].iloc[-1]
             latest_sma50 = df['SMA_50'].iloc[-1]
 
             reasons = []
-            score = 0  # Punktesystem für Kaufsignal
+            score = 0
 
-            # 1. Kriterium: Trend gegenüber SMA 20
+            # Kriterium 1: SMA 20
             if latest_close > latest_sma20:
-                reasons.append("🟢 **Positiver Kurzfrist-Trend:** Der aktuelle Kurs liegt über dem 20-Tage-Durchschnitt (SMA 20).")
+                reasons.append("[+] **Positiver Kurzfrist-Trend:** Der aktuelle Kurs liegt über dem 20-Tage-Durchschnitt (SMA 20).")
                 score += 1
             else:
-                reasons.append("🔴 **Negativer Kurzfrist-Trend:** Der Kurs liegt unter dem 20-Tage-Durchschnitt (SMA 20), was auf Abwärtsdruck hinweist.")
+                reasons.append("[-] **Negativer Kurzfrist-Trend:** Der Kurs liegt unter dem 20-Tage-Durchschnitt (SMA 20).")
                 score -= 1
 
-            # 2. Kriterium: Trend gegenüber SMA 50
+            # Kriterium 2: SMA 50
             if latest_close > latest_sma50:
-                reasons.append("🟢 **Starke Basis:** Der Kurs behauptet sich über dem 50-Tage-Durchschnitt (SMA 50).")
+                reasons.append("[+] **Starke Basis:** Der Kurs behauptet sich über dem 50-Tage-Durchschnitt (SMA 50).")
                 score += 1
             else:
-                reasons.append("🔴 **Schwächephase:** Der Kurs verharrt unter dem 50-Tage-Durchschnitt (SMA 50).")
+                reasons.append("[-] **Schwächephase:** Der Kurs verharrt unter dem 50-Tage-Durchschnitt (SMA 50).")
                 score -= 1
 
-            # 3. Kriterium: RSI (Overbought/Oversold)
+            # Kriterium 3: RSI
             if latest_rsi < 30:
-                reasons.append(f"🟢 **Überverkauft (RSI = {latest_rsi:.1f}):** Der Relative-Stärke-Index liegt unter 30. Die Aktie ist historisch günstig/überverkauft – oft Gegenbewegung nach oben möglich.")
+                reasons.append(f"[+] **Überverkauft (RSI = {latest_rsi:.1f}):** Der Wert liegt unter 30. Historisch günstige Situation / Erholungspotenzial vorhanden.")
                 score += 1.5
             elif latest_rsi > 70:
-                reasons.append(f"🔴 **Überkauft (RSI = {latest_rsi:.1f}):** Der RSI liegt über 70. Die Aktie ist stark gestiegen – erhöhtes Risiko für Gewinnmitnahmen/Rücksetzer.")
+                reasons.append(f"[-] **Überkauft (RSI = {latest_rsi:.1f}):** Der Wert liegt über 70. Gewinne wurden stark ausgereizt / erhöhtes Korrekturrisiko.")
                 score -= 1.5
             else:
-                reasons.append(f"⚪ **Neutraler RSI (RSI = {latest_rsi:.1f}):** Der Momentum-Indikator liegt im ausgeglichenen Bereich (zwischen 30 und 70).")
+                reasons.append(f"[i] **Neutraler RSI (RSI = {latest_rsi:.1f}):** Der Momentum-Indikator liegt im ausgeglichenen Bereich (zwischen 30 und 70).")
 
-            # Fazit ausgeben
+            # Fazit
             if score >= 1.5:
-                st.success("**Gesamteinschätzung: KAUFEN / BULLISCH**")
+                st.success("[SIGNAL: KAUFEN / BULLISCH]")
             elif score <= -1.5:
-                st.error("**Gesamteinschätzung: VERKAUFEN / BÄRISCH**")
+                st.error("[SIGNAL: VERKAUFEN / BÄRISCH]")
             else:
-                st.warning("**Gesamteinschätzung: HALTEN / NEUTRAL**")
+                st.warning("[SIGNAL: HALTEN / NEUTRAL]")
 
-            st.write("**Warum dieses Ergebnis?**")
+            st.write("**Begründung der Analyse:**")
             for r in reasons:
                 st.markdown(f"- {r}")
 
     except Exception as e:
-        st.error(f"Ein Fehler ist aufgetreten: {e}")
+        st.error(f"[FEHLER] Fehler bei der Datenverarbeitung: {e}")
