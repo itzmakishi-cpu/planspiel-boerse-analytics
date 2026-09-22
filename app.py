@@ -5,20 +5,23 @@ from plotly.subplots import make_subplots
 import pandas as pd
 import numpy as np
 
-# Seiten-Layout konfigurieren
-st.set_page_config(page_title="Aktien-Analyse Dashboard", layout="wide")
+# 1. APP-LAYOUT & DESIGN (Clean Look)
+st.set_page_config(page_title="Aktien Dashboard", layout="wide", initial_sidebar_state="collapsed")
 
-st.title("Aktien-Analyse Dashboard")
+# CSS für einen saubereren "Real App"-Look (versteckt Standard-Streamlit-Elemente)
+st.markdown("""
+    <style>
+    #MainMenu {visibility: hidden;}
+    footer {visibility: hidden;}
+    header {visibility: hidden;}
+    .block-container {padding-top: 2rem; padding-bottom: 2rem;}
+    </style>
+""", unsafe_allow_html=True)
 
-# ---------------------------------------------------------
-# SIDEBAR: EINSTELLUNGEN
-# ---------------------------------------------------------
-st.sidebar.header("Einstellungen")
-
-# 1. Vordefinierte Aktienliste zur einfachen Auswahl
+# 2. AKTIEN-DATENBANK (Feste Auswahl)
 STOCK_DICT = {
-    "NVIDIA Corporation (NVDA)": "NVDA",
     "Apple Inc. (AAPL)": "AAPL",
+    "NVIDIA Corporation (NVDA)": "NVDA",
     "Microsoft Corporation (MSFT)": "MSFT",
     "Tesla, Inc. (TSLA)": "TSLA",
     "Amazon.com Inc. (AMZN)": "AMZN",
@@ -30,164 +33,153 @@ STOCK_DICT = {
     "Deutsche Telekom (DTE.DE)": "DTE.DE",
     "BMW AG (BMW.DE)": "BMW.DE",
     "Mercedes-Benz Group (MBG.DE)": "MBG.DE",
-    "Volkswagen AG (VOW3.DE)": "VOW3.DE",
-    "-- Eigene Eingabe --": "CUSTOM"
+    "Volkswagen AG (VOW3.DE)": "VOW3.DE"
 }
 
-selected_stock_label = st.sidebar.selectbox("Aktie auswählen:", list(STOCK_DICT.keys()))
+# 3. KOPFZEILE & AUSWAHL (Zentral im Hauptfenster)
+st.markdown("### Aktien-Analyse & Prognose")
+selected_stock_label = st.selectbox("Wähle eine Aktie aus der Liste:", list(STOCK_DICT.keys()), label_visibility="collapsed")
+ticker_input = STOCK_DICT[selected_stock_label]
 
-if STOCK_DICT[selected_stock_label] == "CUSTOM":
-    ticker_input = st.sidebar.text_input("Manuelles Symbol eingeben (z. B. AMD):", value="AMD").upper().strip()
+# Chart-Container vorab erstellen (damit wir den Zeitraum-Schalter darunter platzieren können)
+chart_container = st.container()
+
+# 4. ZEITRAUM-AUSWAHL (Direkt unter dem Chart als flache Leiste)
+st.write("") # Abstand
+col_space1, col_center, col_space2 = st.columns([1, 3, 1])
+with col_center:
+    timeframe_options = {
+        "1 Tag": ("1d", "5m"),
+        "1 Woche": ("5d", "15m"),
+        "1 Monat": ("1mo", "1d"),
+        "1 Jahr": ("1y", "1d"),
+        "3 Jahre": ("3y", "1wk")
+    }
+    # Horizontaler Radio-Button für App-ähnliche Bedienung
+    selected_tf = st.radio("Zeitraum", list(timeframe_options.keys()), index=3, horizontal=True, label_visibility="collapsed")
+    period, interval = timeframe_options[selected_tf]
+
+# 5. DATEN LADEN & BERECHNEN
+with st.spinner("Lade Daten..."):
+    stock = yf.Ticker(ticker_input)
+    df = stock.history(period=period, interval=interval)
+
+if df.empty:
+    st.error(f"[FEHLER] Keine Daten für {ticker_input} verfügbar.")
 else:
-    ticker_input = STOCK_DICT[selected_stock_label]
+    # Metriken berechnen
+    latest_close = df['Close'].iloc[-1]
+    first_close = df['Close'].iloc[0]
+    price_change = latest_close - first_close
+    pct_change = (price_change / first_close) * 100
 
-# 2. Zeiträume definieren
-timeframe_options = {
-    "1 Tag": ("1d", "5m"),
-    "1 Woche": ("5d", "15m"),
-    "1 Monat": ("1mo", "1d"),
-    "1 Jahr": ("1y", "1d"),
-    "3 Jahre": ("3y", "1wk")
-}
+    # KPIs ganz oben anzeigen
+    col1, col2, col3, col4 = st.columns(4)
+    col1.metric("Aktueller Kurs", f"{latest_close:.2f} USD")
+    col2.metric("Veränderung", f"{price_change:+.2f} USD", f"{pct_change:+.2f}%")
+    col3.metric("Tief (Zeitraum)", f"{df['Low'].min():.2f} USD")
+    col4.metric("Hoch (Zeitraum)", f"{df['High'].max():.2f} USD")
 
-selected_tf = st.sidebar.radio("Zeitraum wählen:", list(timeframe_options.keys()), index=3)
-period, interval = timeframe_options[selected_tf]
+    # Trend-Prognose berechnen (Lineare Regression)
+    x_vals = np.arange(len(df))
+    y_vals = df['Close'].values
+    z = np.polyfit(x_vals, y_vals, 1) # 1. Grades = Lineare Linie
+    p = np.poly1d(z)
+    
+    # Zukunftspunkte generieren (ca. 10% des Zeitraums in die Zukunft)
+    proj_len = max(5, len(df) // 10)
+    x_proj = np.arange(len(df) - 1, len(df) + proj_len)
+    y_proj = p(x_proj)
+    
+    avg_delta = (df.index[-1] - df.index[0]) / len(df)
+    future_dates = [df.index[-1] + avg_delta * i for i in range(0, proj_len + 1)]
 
-# ---------------------------------------------------------
-# DATEN LADEN & VERARBEITEN
-# ---------------------------------------------------------
-if ticker_input:
-    try:
-        stock = yf.Ticker(ticker_input)
-        df = stock.history(period=period, interval=interval)
+    # 6. GRAFIK AUFBAUEN (Plotly)
+    fig = make_subplots(
+        rows=2, cols=1, 
+        shared_xaxes=True, 
+        vertical_spacing=0.05, 
+        row_heights=[0.8, 0.2]
+    )
 
-        if df.empty:
-            st.error(f"[FEHLER] Keine Daten für Symbol '{ticker_input}' gefunden.")
-        else:
-            info = stock.info
-            company_name = info.get('longName', ticker_input)
+    # A) Kerzenchart
+    fig.add_trace(go.Candlestick(
+        x=df.index, open=df['Open'], high=df['High'], low=df['Low'], close=df['Close'],
+        name="Kurs", increasing_line_color='#26a69a', decreasing_line_color='#ef5350'
+    ), row=1, col=1)
 
-            st.subheader(f"{company_name} [{ticker_input}] — Zeitraum: {selected_tf}")
+    # B) Historischer Trend
+    fig.add_trace(go.Scatter(
+        x=df.index, y=p(x_vals), mode='lines', name='Bisheriger Trend',
+        line=dict(color='rgba(255, 255, 255, 0.3)', width=2, dash='dash')
+    ), row=1, col=1)
 
-            # Indikatoren berechnen: SMA 20 & SMA 50
-            df['SMA_20'] = df['Close'].rolling(window=20).mean()
-            df['SMA_50'] = df['Close'].rolling(window=50).mean()
+    # C) Zukunfts-Prognose (Wahrscheinlicher Verlauf)
+    fig.add_trace(go.Scatter(
+        x=future_dates, y=y_proj, mode='lines', name='Prognostizierter Verlauf',
+        line=dict(color='#ffb74d', width=3, dash='dot')
+    ), row=1, col=1)
 
-            # Relative Strength Index (RSI)
-            delta = df['Close'].diff()
-            gain = (delta.where(delta > 0, 0)).rolling(window=14).mean()
-            loss = (-delta.where(delta < 0, 0)).rolling(window=14).mean()
-            rs = gain / loss
-            df['RSI'] = 100 - (100 / (1 + rs))
+    # D) Volumen
+    volume_colors = ['#26a69a' if df['Close'].iloc[i] >= df['Open'].iloc[i] else '#ef5350' for i in range(len(df))]
+    fig.add_trace(go.Bar(
+        x=df.index, y=df['Volume'], name="Volumen", marker_color=volume_colors
+    ), row=2, col=1)
 
-            # KPIs
-            latest_close = df['Close'].iloc[-1]
-            first_close = df['Close'].iloc[0]
-            price_change = latest_close - first_close
-            pct_change = (price_change / first_close) * 100
+    # 7. GRAFIK "APP-LIKE" KONFIGURIEREN (Kein Zoom, clean)
+    fig.update_layout(
+        height=550,
+        template="plotly_dark",
+        margin=dict(l=10, r=10, t=10, b=10),
+        showlegend=False, # Ausblenden für cleaneren Look, Hover zeigt alles
+        xaxis_rangeslider_visible=False,
+        hovermode="x unified",
+        paper_bgcolor='rgba(0,0,0,0)',
+        plot_bgcolor='rgba(0,0,0,0)'
+    )
+    
+    # Zoom und Panning deaktivieren, nur Hover erlauben
+    fig.update_xaxes(fixedrange=True, showgrid=False)
+    fig.update_yaxes(fixedrange=True, showgrid=True, gridcolor='rgba(255,255,255,0.1)')
 
-            m1, m2, m3, m4 = st.columns(4)
-            m1.metric("Aktueller Kurs", f"{latest_close:.2f} USD")
-            m2.metric("Veränderung im Zeitraum", f"{price_change:+.2f} USD", f"{pct_change:+.2f}%")
-            m3.metric("Höchstkurs", f"{df['High'].max():.2f} USD")
-            m4.metric("Tiefstkurs", f"{df['Low'].min():.2f} USD")
+    # Chart im vorher definierten Container anzeigen (Menu Bar deaktiviert)
+    with chart_container:
+        st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False})
 
-            # ---------------------------------------------------------
-            # 3. GRAFIK (Candlestick + Moving Averages + Volumen)
-            # ---------------------------------------------------------
-            fig = make_subplots(
-                rows=2, cols=1, 
-                shared_xaxes=True, 
-                vertical_spacing=0.08, 
-                row_heights=[0.75, 0.25],
-                subplot_titles=("Kursverlauf (Candlestick) & Durchschnitte", "Handelsvolumen")
-            )
+    # 8. ANALYSE & ERKLÄRUNG
+    st.markdown("---")
+    st.markdown("#### Einschätzung & Verlauf")
 
-            # Candlestick Chart
-            fig.add_trace(go.Candlestick(
-                x=df.index,
-                open=df['Open'], high=df['High'],
-                low=df['Low'], close=df['Close'],
-                name="Kurs (OHLC)"
-            ), row=1, col=1)
+    # Prognose-Richtung auswerten
+    trend_slope = z[0] # Steigung der Trendlinie
+    
+    if trend_slope > 0:
+        trend_text = f"[+] **Positiver Ausblick:** Die gestrichelte orange Linie in der Grafik zeigt die mathematische Prognose. Wenn das aktuelle Momentum anhält, ist in absehbarer Zeit mit einem weiteren Kursanstieg in Richtung **{y_proj[-1]:.2f} USD** zu rechnen."
+        signal = "[SIGNAL: KAUFEN]"
+        signal_color = "success"
+    elif trend_slope < 0:
+        trend_text = f"[-] **Negativer Ausblick:** Die gestrichelte orange Linie (Prognose) zeigt nach unten. Hält der aktuelle Druck an, könnte der Kurs weiter in Richtung **{y_proj[-1]:.2f} USD** abrutschen. Vorsicht ist geboten."
+        signal = "[SIGNAL: VERKAUFEN]"
+        signal_color = "error"
+    else:
+        trend_text = "[i] **Seitwärtsphase:** Die Trendlinie verläuft nahezu flach. Es ist aktuell mit keinen großen, eindeutigen Ausbrüchen nach oben oder unten zu rechnen."
+        signal = "[SIGNAL: HALTEN]"
+        signal_color = "warning"
 
-            # SMA Lines
-            fig.add_trace(go.Scatter(
-                x=df.index, y=df['SMA_20'], mode='lines', name='SMA 20 (Kurzfristig)',
-                line=dict(color='orange', width=1.5)
-            ), row=1, col=1)
+    # Ausgabe des Signals
+    if signal_color == "success":
+        st.success(signal)
+    elif signal_color == "error":
+        st.error(signal)
+    else:
+        st.warning(signal)
 
-            fig.add_trace(go.Scatter(
-                x=df.index, y=df['SMA_50'], mode='lines', name='SMA 50 (Mittelfristig)',
-                line=dict(color='deepskyblue', width=1.5)
-            ), row=1, col=1)
-
-            # Volumen Chart
-            volume_colors = ['#26a69a' if df['Close'].iloc[i] >= df['Open'].iloc[i] else '#ef5350' for i in range(len(df))]
-            fig.add_trace(go.Bar(
-                x=df.index, y=df['Volume'], name="Volumen", marker_color=volume_colors
-            ), row=2, col=1)
-
-            # Layout Styling
-            fig.update_layout(
-                height=650,
-                template="plotly_dark",
-                xaxis_rangeslider_visible=False,
-                showlegend=True,
-                margin=dict(l=20, r=20, t=40, b=20)
-            )
-
-            st.plotly_chart(fig, use_container_width=True)
-
-            # ---------------------------------------------------------
-            # 4. SIGNAL-ANALYSE & BEGRÜNDUNG
-            # ---------------------------------------------------------
-            st.markdown("### Signal-Analyse & Begründung")
-
-            latest_rsi = df['RSI'].iloc[-1] if not np.isnan(df['RSI'].iloc[-1]) else 50
-            latest_sma20 = df['SMA_20'].iloc[-1]
-            latest_sma50 = df['SMA_50'].iloc[-1]
-
-            reasons = []
-            score = 0
-
-            # Kriterium 1: SMA 20
-            if latest_close > latest_sma20:
-                reasons.append("[+] **Positiver Kurzfrist-Trend:** Der aktuelle Kurs liegt über dem 20-Tage-Durchschnitt (SMA 20).")
-                score += 1
-            else:
-                reasons.append("[-] **Negativer Kurzfrist-Trend:** Der Kurs liegt unter dem 20-Tage-Durchschnitt (SMA 20).")
-                score -= 1
-
-            # Kriterium 2: SMA 50
-            if latest_close > latest_sma50:
-                reasons.append("[+] **Starke Basis:** Der Kurs behauptet sich über dem 50-Tage-Durchschnitt (SMA 50).")
-                score += 1
-            else:
-                reasons.append("[-] **Schwächephase:** Der Kurs verharrt unter dem 50-Tage-Durchschnitt (SMA 50).")
-                score -= 1
-
-            # Kriterium 3: RSI
-            if latest_rsi < 30:
-                reasons.append(f"[+] **Überverkauft (RSI = {latest_rsi:.1f}):** Der Wert liegt unter 30. Historisch günstige Situation / Erholungspotenzial vorhanden.")
-                score += 1.5
-            elif latest_rsi > 70:
-                reasons.append(f"[-] **Überkauft (RSI = {latest_rsi:.1f}):** Der Wert liegt über 70. Gewinne wurden stark ausgereizt / erhöhtes Korrekturrisiko.")
-                score -= 1.5
-            else:
-                reasons.append(f"[i] **Neutraler RSI (RSI = {latest_rsi:.1f}):** Der Momentum-Indikator liegt im ausgeglichenen Bereich (zwischen 30 und 70).")
-
-            # Fazit
-            if score >= 1.5:
-                st.success("[SIGNAL: KAUFEN / BULLISCH]")
-            elif score <= -1.5:
-                st.error("[SIGNAL: VERKAUFEN / BÄRISCH]")
-            else:
-                st.warning("[SIGNAL: HALTEN / NEUTRAL]")
-
-            st.write("**Begründung der Analyse:**")
-            for r in reasons:
-                st.markdown(f"- {r}")
-
-    except Exception as e:
-        st.error(f"[FEHLER] Fehler bei der Datenverarbeitung: {e}")
+    st.markdown(trend_text)
+    
+    st.markdown("""
+    **Wie ist die Grafik zu lesen?**
+    - **Rot/Grüne Balken (oben):** Die tatsächliche Kursentwicklung (Grün = Kurs stieg, Rot = Kurs fiel). Fährst du mit der Maus darüber, siehst du die genauen Höchst- und Tiefstwerte.
+    - **Weiße gestrichelte Linie:** Der durchschnittliche Trend der Vergangenheit.
+    - **Orange gepunktete Linie:** Die mathematische Fortsetzung dieses Trends in die nahe Zukunft (Prognose).
+    - **Balken (unten):** Das Handelsvolumen (wie viele Aktien an diesem Zeitpunkt gehandelt wurden).
+    """)
