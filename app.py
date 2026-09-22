@@ -13,7 +13,6 @@ st.set_page_config(
 )
 
 # 2. HTML & CUSTOM CSS FOR MOBILE / HERMIT LIGHT APP
-# Auto-Refresh wurde entfernt, reines UI-Styling bleibt
 st.markdown("""
     <head>
         <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
@@ -179,25 +178,35 @@ else:
     dist_to_support_pct = ((latest_close - support_level) / support_level) * 100
 
     # ---------------------------------------------------------
-    # 7. CHART AUFBAUEN (Komplett gesperrt für echtes Scrollen)
+    # 7. CHART AUFBAUEN
     # ---------------------------------------------------------
     fig = make_subplots(rows=2, cols=1, shared_xaxes=True, vertical_spacing=0.04, row_heights=[0.78, 0.22])
 
-    # Je nach Schalter den Chart rendern
+    # Dynamische Farbgebung für die cleane Linie basierend auf der Gesamt-Performance
+    if pct_change >= 0:
+        line_color = '#26a69a'  # Gruen
+        fill_color = 'rgba(38, 166, 154, 0.12)'
+    else:
+        line_color = '#ef5350'  # Rot
+        fill_color = 'rgba(239, 83, 80, 0.12)'
+
     if chart_type == "Candlestick":
         fig.add_trace(go.Candlestick(
             x=df.index, open=df['Open'], high=df['High'], low=df['Low'], close=df['Close'],
             name="Kurs", increasing_line_color='#26a69a', decreasing_line_color='#ef5350'
         ), row=1, col=1)
     else:
-        # Cleane, nahtlos verbundene Linie
+        # Cleane Linie mit dynamischen Farben und Schattierung
         fig.add_trace(go.Scatter(
             x=df.index, y=df['Close'],
             mode='lines', name='Kurs',
-            line=dict(color='#29b6f6', width=2.5),
+            line=dict(color=line_color, width=2.5),
+            fill='tozeroy',
+            fillcolor=fill_color,
             connectgaps=True
         ), row=1, col=1)
 
+    # Unterstützung (Gruen) & Widerstand (Rot)
     fig.add_trace(go.Scatter(
         x=[df.index[0], df.index[-1]], y=[support_level, support_level],
         mode='lines', name='Unterstützung', line=dict(color='#81c784', width=1.5, dash='dot')
@@ -208,6 +217,7 @@ else:
         mode='lines', name='Widerstand', line=dict(color='#e57373', width=1.5, dash='dot')
     ), row=1, col=1)
 
+    # Volumen
     volume_colors = ['#26a69a' if df['Close'].iloc[i] >= df['Open'].iloc[i] else '#ef5350' for i in range(len(df))]
     fig.add_trace(go.Bar(
         x=df.index, y=df['Volume'], name="Volumen", marker_color=volume_colors
@@ -222,10 +232,9 @@ else:
         hovermode="x unified",
         paper_bgcolor='rgba(0,0,0,0)',
         plot_bgcolor='rgba(0,0,0,0)',
-        dragmode=False # Deaktiviert das Greifen/Ziehen im gesamten Chart
+        dragmode=False  # Reines Durchscrollen der Seite ohne Verhakung im Chart
     )
 
-    # Sperrt die Achsen endgültig ab, damit das Wischen auf dem Touchscreen nur die Webseite scrollt
     fig.update_xaxes(fixedrange=True, showgrid=False)
     fig.update_yaxes(fixedrange=True, showgrid=True, gridcolor='rgba(255,255,255,0.08)')
 
@@ -233,7 +242,7 @@ else:
         st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False, 'scrollZoom': False})
 
     # ---------------------------------------------------------
-    # 8. DIE 3 ENTSCHEIDUNGSPUNKTE 
+    # 8. DIE 3 ENTSCHEIDUNGSPUNKTE
     # ---------------------------------------------------------
     st.markdown("---")
     st.markdown("#### Entscheidungs-Metriken")
