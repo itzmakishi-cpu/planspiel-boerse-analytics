@@ -13,9 +13,11 @@ st.set_page_config(
 )
 
 # 2. HTML & CUSTOM CSS FOR MOBILE / HERMIT LIGHT APP
+# Beinhaltet "http-equiv='refresh' content='30'" für Auto-Refresh alle 30 Sekunden
 st.markdown("""
     <head>
         <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+        <meta http-equiv="refresh" content="30">
         <meta name="theme-color" content="#0e1117">
         <meta name="mobile-web-app-capable" content="yes">
         <meta name="apple-mobile-web-app-capable" content="yes">
@@ -83,7 +85,7 @@ STOCK_DICT = {
 }
 
 # 4. SELEKTION
-st.markdown("### Aktien- & Verhaltens-Analyse")
+st.markdown("### Aktien-Analyse (Live)")
 selected_stock_label = st.selectbox(
     "Aktie auswählen", 
     list(STOCK_DICT.keys()), 
@@ -91,7 +93,6 @@ selected_stock_label = st.selectbox(
 )
 ticker_input = STOCK_DICT[selected_stock_label]
 
-# Chart-Container
 chart_container = st.container()
 
 # 5. ZEITRAUM-AUSWAHL
@@ -113,42 +114,37 @@ selected_tf = st.radio(
 period, interval = timeframe_options[selected_tf]
 
 # 6. DATEN VERARBEITEN
-with st.spinner("Lade Daten und analysiere Verhaltensmuster..."):
+with st.spinner("Aktualisiere Daten..."):
     stock = yf.Ticker(ticker_input)
     df = stock.history(period=period, interval=interval)
 
 if df.empty:
     st.error(f"[FEHLER] Keine Daten für {ticker_input} verfügbar.")
 else:
-    # Basic Metrics
+    # Metriken berechnen
     latest_close = df['Close'].iloc[-1]
     first_close = df['Close'].iloc[0]
     price_change = latest_close - first_close
     pct_change = (price_change / first_close) * 100
 
-    # Key Level (Unterstützung & Widerstand)
     support_level = df['Low'].min()
     resistance_level = df['High'].max()
 
-    # Metrics Display (2x2 Grid)
     kpi_col1, kpi_col2 = st.columns(2)
     kpi_col1.metric("Aktueller Kurs", f"{latest_close:.2f} USD")
     kpi_col2.metric("Veränderung", f"{price_change:+.2f} USD", f"{pct_change:+.2f}%")
 
-    kpi_col3, kpi_col4 = st.columns(2)
-    kpi_col3.metric("Unterstützung (Tief)", f"{support_level:.2f} USD")
-    kpi_col4.metric("Widerstand (Hoch)", f"{resistance_level:.2f} USD")
-
     # ---------------------------------------------------------
-    # HISTORISCHER MUSTER-VERGLEICH (Pattern Matching)
+    # ANALYSE-VARIABLEN BERECHNEN
     # ---------------------------------------------------------
+    
+    # 1. Muster-Vergleich
     lookback = min(5, len(df) - 1)
     if lookback > 0:
         recent_move = (df['Close'].iloc[-1] - df['Close'].iloc[-1 - lookback]) / df['Close'].iloc[-1 - lookback]
     else:
         recent_move = 0.0
 
-    # Wir durchsuchen die Kurshistorie nach ähnlichen Bewegungen (+/- 2.5%)
     df['Move_N'] = df['Close'].pct_change(lookback)
     df['Future_Move_N'] = df['Close'].pct_change(lookback).shift(-lookback)
 
@@ -168,9 +164,7 @@ else:
         success_rate = 50.0
         avg_future_return = 0.0
 
-    # ---------------------------------------------------------
-    # MARKT-PSYCHOLOGIE & VOLUMEN-ANALYSE
-    # ---------------------------------------------------------
+    # 2. Volumen-Psychologie
     df['Is_Up_Day'] = df['Close'] > df['Open']
     up_volume = df[df['Is_Up_Day']]['Volume'].sum()
     down_volume = df[~df['Is_Up_Day']]['Volume'].sum()
@@ -181,46 +175,34 @@ else:
     else:
         buying_ratio = 50.0
 
-    # Distance to Support
+    # 3. Zonen-Abstand
     dist_to_support_pct = ((latest_close - support_level) / support_level) * 100
 
     # ---------------------------------------------------------
-    # 7. CHART AUFBAUEN
+    # 7. CHART AUFBAUEN (Scrollbar & Zoombar)
     # ---------------------------------------------------------
-    fig = make_subplots(
-        rows=2, cols=1, 
-        shared_xaxes=True, 
-        vertical_spacing=0.04, 
-        row_heights=[0.78, 0.22]
-    )
+    fig = make_subplots(rows=2, cols=1, shared_xaxes=True, vertical_spacing=0.04, row_heights=[0.78, 0.22])
 
-    # Kerzenchart
     fig.add_trace(go.Candlestick(
         x=df.index, open=df['Open'], high=df['High'], low=df['Low'], close=df['Close'],
         name="Kurs", increasing_line_color='#26a69a', decreasing_line_color='#ef5350'
     ), row=1, col=1)
 
-    # Unterstützungslinie (Support)
     fig.add_trace(go.Scatter(
         x=[df.index[0], df.index[-1]], y=[support_level, support_level],
-        mode='lines', name='Unterstützung',
-        line=dict(color='#81c784', width=1.5, dash='dot')
+        mode='lines', name='Unterstützung', line=dict(color='#81c784', width=1.5, dash='dot')
     ), row=1, col=1)
 
-    # Widerstandslinie (Resistance)
     fig.add_trace(go.Scatter(
         x=[df.index[0], df.index[-1]], y=[resistance_level, resistance_level],
-        mode='lines', name='Widerstand',
-        line=dict(color='#e57373', width=1.5, dash='dot')
+        mode='lines', name='Widerstand', line=dict(color='#e57373', width=1.5, dash='dot')
     ), row=1, col=1)
 
-    # Volumen
     volume_colors = ['#26a69a' if df['Close'].iloc[i] >= df['Open'].iloc[i] else '#ef5350' for i in range(len(df))]
     fig.add_trace(go.Bar(
         x=df.index, y=df['Volume'], name="Volumen", marker_color=volume_colors
     ), row=2, col=1)
 
-    # Layout Anpassungen
     fig.update_layout(
         height=420,
         template="plotly_dark",
@@ -232,72 +214,42 @@ else:
         plot_bgcolor='rgba(0,0,0,0)'
     )
 
-    fig.update_xaxes(fixedrange=True, showgrid=False)
-    fig.update_yaxes(fixedrange=True, showgrid=True, gridcolor='rgba(255,255,255,0.08)')
+    # WICHTIG: fixedrange=False aktiviert das Wischen, Scrollen und Zoomen auf dem Touchscreen
+    fig.update_xaxes(fixedrange=False, showgrid=False)
+    fig.update_yaxes(fixedrange=False, showgrid=True, gridcolor='rgba(255,255,255,0.08)')
 
-    # Chart rendern
     with chart_container:
         st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False})
 
     # ---------------------------------------------------------
-    # 8. AUSWERTUNG: HISTORIE + PSYCHOLOGIE + SIGNAL
+    # 8. DIE 3 ENTSCHEIDUNGSPUNKTE (Klar als Grün/Rot definiert)
     # ---------------------------------------------------------
     st.markdown("---")
-    st.markdown("#### Historie & Anleger-Verhalten")
+    st.markdown("#### Entscheidungs-Metriken")
 
-    # Gesamteinschätzung berechnen
-    overall_score = 0
-
-    if success_rate > 55:
-        overall_score += 1
-    elif success_rate < 45:
-        overall_score -= 1
-
-    if buying_ratio > 55:
-        overall_score += 1
-    elif buying_ratio < 45:
-        overall_score -= 1
-
-    if dist_to_support_pct < 3.0:
-        # Nah an der Unterstützung -> Schnäppchenjäger-Zone
-        overall_score += 1
-
-    # Signal-Ausgabe
-    if overall_score >= 1:
-        st.success("[SIGNAL: KAUFEN / DIP-BUYING POTENZIAL]")
-    elif overall_score <= -1:
-        st.error("[SIGNAL: VERKAUFEN / ABWÄRTSDRUCK]")
-    else:
-        st.warning("[SIGNAL: HALTEN / ABWARTEN]")
-
-    # Detail-Analyse
-    st.markdown(f"**[MUSTER-ANALYSE] Ist diese Situation schon vorgekommen?**")
+    # Kriterium 1: Muster-Analyse
     if match_count > 0:
-        st.markdown(
-            f"- Ähnliche Kursbewegungen ({recent_move:+.1%}) wurden in der Historie dieser Aktie **{match_count}-mal** identifiziert.\n"
-            f"- In **{success_rate:.0f}% der Fälle** folgte daraufhin eine Kurserholung.\n"
-            f"- Die durchschnittliche Rendite in den Folgeperioden lag bei **{avg_future_return:+.1f}%**."
-        )
+        if success_rate > 55:
+            st.success(f"[1] MUSTER-ANALYSE: POSITIV\n\nÄhnliche Bewegungen gab es {match_count}-mal. In {success_rate:.0f}% der Fälle folgte ein Anstieg (Durchschnittlich {avg_future_return:+.1f}%).")
+        elif success_rate < 45:
+            st.error(f"[1] MUSTER-ANALYSE: NEGATIV\n\nÄhnliche Bewegungen gab es {match_count}-mal. In nur {success_rate:.0f}% der Fälle erholte sich der Kurs danach.")
+        else:
+            st.warning(f"[1] MUSTER-ANALYSE: NEUTRAL\n\nDie Historie zeigt keine klare Richtung bei diesem Muster ({success_rate:.0f}% Erfolgsquote).")
     else:
-        st.markdown("- Für diese spezifische Kurzfrist-Bewegung wurden keine exakten historischen Parallelen im gewählten Zeitraum gefunden.")
+        st.info("[1] MUSTER-ANALYSE: UNBEKANNT\n\nKeine exakten historischen Parallelen für diese exakte Bewegung gefunden.")
 
-    st.markdown(f"**[ANLEGER-PSYCHOLOGIE] Einsteigen oder Abspringen?**")
+    # Kriterium 2: Anleger-Psychologie
     if buying_ratio > 55:
-        st.markdown(f"- **Kaufdruck dominiert ({buying_ratio:.0f}% Akkumulation):** Höheres Volumen an steigenden Tagen zeigt, dass Anleger gezielt einsteigen und Rücksetzer aufkaufen.")
+        st.success(f"[2] ANLEGER-PSYCHOLOGIE: POSITIV\n\nKaufdruck dominiert. {buying_ratio:.0f}% des Volumens entstand an steigenden Tagen. Anleger kaufen gezielt nach.")
     elif buying_ratio < 45:
-        st.markdown(f"- **Verkaufsdruck dominiert ({100 - buying_ratio:.0f}% Distribution):** Anleger ziehen Kapital ab. Bei Kursrücksetzern droht Panik, da Marktteilnehmer eher abspringen als nachzukaufen.")
+        st.error(f"[2] ANLEGER-PSYCHOLOGIE: NEGATIV\n\nVerkaufsdruck dominiert. {100 - buying_ratio:.0f}% des Volumens entstand an fallenden Tagen. Anleger springen ab.")
     else:
-        st.markdown(f"- **Ausgeglichene Lage ({buying_ratio:.0f}% Kaufvolumen):** Käufer und Verkäufer halten sich derzeit die Waage.")
+        st.warning(f"[2] ANLEGER-PSYCHOLOGIE: NEUTRAL\n\nKauf- und Verkaufsdruck halten sich die Waage ({buying_ratio:.0f}% Käuferanteil).")
 
+    # Kriterium 3: Zonen-Abstand (Support / Resistance)
     if dist_to_support_pct < 3.0:
-        st.markdown(f"- **Unterstützungszone nah ({latest_close:.2f} USD):** Der Kurs testet eine historische Untergrenze. Hier steigen erfahrungsgemäß Schnäppchenjäger ein, um von Gegenbewegungen zu profitieren.")
+        st.success(f"[3] ZONEN-ABSTAND: POSITIV\n\nKurs ist nahe der Unterstützungslinie bei {support_level:.2f} USD. Starke Chance für Schnäppchenjäger.")
     elif latest_close >= resistance_level * 0.98:
-        st.markdown(f"- **Widerstandszone erreicht ({resistance_level:.2f} USD):** Der Kurs ist nahe dem Höchststand. Hier neigen Anleger zu Gewinnmitnahmen, weshalb Verkaufsdruck entstehen kann.")
-
-    st.markdown("""
-    **Legende zur Grafik:**
-    - **Gruene / Rote Kerzen:** Aktueller Kursverlauf (Eröffnung, Hoch, Tief, Schluss).
-    - **Gepunktete gruene Linie:** Historische Unterstützung (Kaufzone).
-    - **Gepunktete rote Linie:** Historischer Widerstand (Verkaufszone).
-    - **Balken unten:** Gehandeltes Volumen (Grün = Kaufvolumen, Rot = Verkaufsvolumen).
-    """)
+        st.error(f"[3] ZONEN-ABSTAND: NEGATIV\n\nKurs ist am oberen Widerstand bei {resistance_level:.2f} USD. Gefahr von starken Gewinnmitnahmen.")
+    else:
+        st.warning(f"[3] ZONEN-ABSTAND: NEUTRAL\n\nKurs bewegt sich im unsicheren Mittelfeld (Abstand zur Untergrenze: {dist_to_support_pct:.1f}%).")
