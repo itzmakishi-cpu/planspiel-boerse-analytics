@@ -178,17 +178,21 @@ else:
     dist_to_support_pct = ((latest_close - support_level) / support_level) * 100
 
     # ---------------------------------------------------------
+    # DYNAMISCHES Y-ACHSEN PADDING (Zentriert die Linie mittig)
+    # ---------------------------------------------------------
+    y_min = df['Low'].min()
+    y_max = df['High'].max()
+    y_padding = (y_max - y_min) * 0.15
+    if y_padding == 0:
+        y_padding = y_max * 0.05
+    y_range = [y_min - y_padding, y_max + y_padding]
+
+    # ---------------------------------------------------------
     # 7. CHART AUFBAUEN
     # ---------------------------------------------------------
     fig = make_subplots(rows=2, cols=1, shared_xaxes=True, vertical_spacing=0.04, row_heights=[0.78, 0.22])
 
-    # Dynamische Farbgebung für die cleane Linie basierend auf der Gesamt-Performance
-    if pct_change >= 0:
-        line_color = '#26a69a'  # Gruen
-        fill_color = 'rgba(38, 166, 154, 0.12)'
-    else:
-        line_color = '#ef5350'  # Rot
-        fill_color = 'rgba(239, 83, 80, 0.12)'
+    line_color = '#26a69a' if pct_change >= 0 else '#ef5350'
 
     if chart_type == "Candlestick":
         fig.add_trace(go.Candlestick(
@@ -196,17 +200,15 @@ else:
             name="Kurs", increasing_line_color='#26a69a', decreasing_line_color='#ef5350'
         ), row=1, col=1)
     else:
-        # Cleane Linie mit dynamischen Farben und Schattierung
+        # Cleane, nahtlose Linie (ohne Zeroy-Fill, damit die Skala mittig bleibt)
         fig.add_trace(go.Scatter(
             x=df.index, y=df['Close'],
             mode='lines', name='Kurs',
             line=dict(color=line_color, width=2.5),
-            fill='tozeroy',
-            fillcolor=fill_color,
             connectgaps=True
         ), row=1, col=1)
 
-    # Unterstützung (Gruen) & Widerstand (Rot)
+    # Unterstützung & Widerstand
     fig.add_trace(go.Scatter(
         x=[df.index[0], df.index[-1]], y=[support_level, support_level],
         mode='lines', name='Unterstützung', line=dict(color='#81c784', width=1.5, dash='dot')
@@ -232,11 +234,12 @@ else:
         hovermode="x unified",
         paper_bgcolor='rgba(0,0,0,0)',
         plot_bgcolor='rgba(0,0,0,0)',
-        dragmode=False  # Reines Durchscrollen der Seite ohne Verhakung im Chart
+        dragmode=False  # Sperrt Interaktion für flüssiges App-Scrolling
     )
 
     fig.update_xaxes(fixedrange=True, showgrid=False)
-    fig.update_yaxes(fixedrange=True, showgrid=True, gridcolor='rgba(255,255,255,0.08)')
+    fig.update_yaxes(fixedrange=True, showgrid=True, gridcolor='rgba(255,255,255,0.08)', row=1, col=1, range=y_range)
+    fig.update_yaxes(fixedrange=True, showgrid=False, row=2, col=1)
 
     with chart_container:
         st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False, 'scrollZoom': False})
