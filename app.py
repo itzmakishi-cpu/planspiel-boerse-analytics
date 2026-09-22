@@ -178,7 +178,7 @@ else:
     dist_to_support_pct = ((latest_close - support_level) / support_level) * 100
 
     # ---------------------------------------------------------
-    # DYNAMISCHES Y-ACHSEN PADDING (Zentriert die Linie mittig)
+    # DYNAMISCHES Y-ACHSEN PADDING (Hält die Linie perfekt mittig)
     # ---------------------------------------------------------
     y_min = df['Low'].min()
     y_max = df['High'].max()
@@ -192,21 +192,46 @@ else:
     # ---------------------------------------------------------
     fig = make_subplots(rows=2, cols=1, shared_xaxes=True, vertical_spacing=0.04, row_heights=[0.78, 0.22])
 
-    line_color = '#26a69a' if pct_change >= 0 else '#ef5350'
-
     if chart_type == "Candlestick":
         fig.add_trace(go.Candlestick(
             x=df.index, open=df['Open'], high=df['High'], low=df['Low'], close=df['Close'],
             name="Kurs", increasing_line_color='#26a69a', decreasing_line_color='#ef5350'
         ), row=1, col=1)
     else:
-        # Cleane, nahtlose Linie (ohne Zeroy-Fill, damit die Skala mittig bleibt)
-        fig.add_trace(go.Scatter(
-            x=df.index, y=df['Close'],
-            mode='lines', name='Kurs',
-            line=dict(color=line_color, width=2.5),
-            connectgaps=True
-        ), row=1, col=1)
+        # Cleane Linie mit dynamischer Segment-Farbe (Grün/Rot je Candle)
+        x_coords = df.index
+        y_coords = df['Close']
+        is_up_candle = df['Close'] >= df['Open']
+
+        x_green, y_green = [], []
+        x_red, y_red = [], []
+
+        for i in range(1, len(df)):
+            p1_x, p1_y = x_coords[i-1], y_coords[i-1]
+            p2_x, p2_y = x_coords[i], y_coords[i]
+            
+            if is_up_candle.iloc[i]:
+                x_green.extend([p1_x, p2_x, None])
+                y_green.extend([p1_y, p2_y, None])
+            else:
+                x_red.extend([p1_x, p2_x, None])
+                y_red.extend([p1_y, p2_y, None])
+
+        if x_green:
+            fig.add_trace(go.Scatter(
+                x=x_green, y=y_green,
+                mode='lines', name='Steigend',
+                line=dict(color='#26a69a', width=2.5),
+                connectgaps=False
+            ), row=1, col=1)
+
+        if x_red:
+            fig.add_trace(go.Scatter(
+                x=x_red, y=y_red,
+                mode='lines', name='Fallend',
+                line=dict(color='#ef5350', width=2.5),
+                connectgaps=False
+            ), row=1, col=1)
 
     # Unterstützung & Widerstand
     fig.add_trace(go.Scatter(
