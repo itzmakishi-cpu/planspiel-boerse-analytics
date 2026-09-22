@@ -13,11 +13,10 @@ st.set_page_config(
 )
 
 # 2. HTML & CUSTOM CSS FOR MOBILE / HERMIT LIGHT APP
-# Beinhaltet "http-equiv='refresh' content='30'" für Auto-Refresh alle 30 Sekunden
+# Auto-Refresh wurde entfernt, reines UI-Styling bleibt
 st.markdown("""
     <head>
         <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-        <meta http-equiv="refresh" content="30">
         <meta name="theme-color" content="#0e1117">
         <meta name="mobile-web-app-capable" content="yes">
         <meta name="apple-mobile-web-app-capable" content="yes">
@@ -49,6 +48,7 @@ st.markdown("""
             justify-content: center;
             gap: 4px;
             width: 100%;
+            margin-bottom: 8px;
         }
         div[role="radiogroup"] > label {
             background-color: #161b22;
@@ -85,7 +85,7 @@ STOCK_DICT = {
 }
 
 # 4. SELEKTION
-st.markdown("### Aktien-Analyse (Live)")
+st.markdown("### Aktien-Analyse")
 selected_stock_label = st.selectbox(
     "Aktie auswählen", 
     list(STOCK_DICT.keys()), 
@@ -95,7 +95,7 @@ ticker_input = STOCK_DICT[selected_stock_label]
 
 chart_container = st.container()
 
-# 5. ZEITRAUM-AUSWAHL
+# 5. BEDIENELEMENTE (Zeitraum & Chart-Typ)
 timeframe_options = {
     "1 Tag": ("1d", "5m"),
     "1 Woche": ("5d", "15m"),
@@ -113,8 +113,16 @@ selected_tf = st.radio(
 )
 period, interval = timeframe_options[selected_tf]
 
+chart_type = st.radio(
+    "Ansicht", 
+    ["Linie", "Candlestick"], 
+    index=0, 
+    horizontal=True, 
+    label_visibility="collapsed"
+)
+
 # 6. DATEN VERARBEITEN
-with st.spinner("Aktualisiere Daten..."):
+with st.spinner("Lade Daten..."):
     stock = yf.Ticker(ticker_input)
     df = stock.history(period=period, interval=interval)
 
@@ -137,8 +145,6 @@ else:
     # ---------------------------------------------------------
     # ANALYSE-VARIABLEN BERECHNEN
     # ---------------------------------------------------------
-    
-    # 1. Muster-Vergleich
     lookback = min(5, len(df) - 1)
     if lookback > 0:
         recent_move = (df['Close'].iloc[-1] - df['Close'].iloc[-1 - lookback]) / df['Close'].iloc[-1 - lookback]
@@ -164,29 +170,33 @@ else:
         success_rate = 50.0
         avg_future_return = 0.0
 
-    # 2. Volumen-Psychologie
     df['Is_Up_Day'] = df['Close'] > df['Open']
     up_volume = df[df['Is_Up_Day']]['Volume'].sum()
     down_volume = df[~df['Is_Up_Day']]['Volume'].sum()
     total_volume = up_volume + down_volume
 
-    if total_volume > 0:
-        buying_ratio = (up_volume / total_volume) * 100
-    else:
-        buying_ratio = 50.0
-
-    # 3. Zonen-Abstand
+    buying_ratio = (up_volume / total_volume) * 100 if total_volume > 0 else 50.0
     dist_to_support_pct = ((latest_close - support_level) / support_level) * 100
 
     # ---------------------------------------------------------
-    # 7. CHART AUFBAUEN (Scrollbar & Zoombar)
+    # 7. CHART AUFBAUEN (Komplett gesperrt für echtes Scrollen)
     # ---------------------------------------------------------
     fig = make_subplots(rows=2, cols=1, shared_xaxes=True, vertical_spacing=0.04, row_heights=[0.78, 0.22])
 
-    fig.add_trace(go.Candlestick(
-        x=df.index, open=df['Open'], high=df['High'], low=df['Low'], close=df['Close'],
-        name="Kurs", increasing_line_color='#26a69a', decreasing_line_color='#ef5350'
-    ), row=1, col=1)
+    # Je nach Schalter den Chart rendern
+    if chart_type == "Candlestick":
+        fig.add_trace(go.Candlestick(
+            x=df.index, open=df['Open'], high=df['High'], low=df['Low'], close=df['Close'],
+            name="Kurs", increasing_line_color='#26a69a', decreasing_line_color='#ef5350'
+        ), row=1, col=1)
+    else:
+        # Cleane, nahtlos verbundene Linie
+        fig.add_trace(go.Scatter(
+            x=df.index, y=df['Close'],
+            mode='lines', name='Kurs',
+            line=dict(color='#29b6f6', width=2.5),
+            connectgaps=True
+        ), row=1, col=1)
 
     fig.add_trace(go.Scatter(
         x=[df.index[0], df.index[-1]], y=[support_level, support_level],
@@ -211,23 +221,23 @@ else:
         xaxis_rangeslider_visible=False,
         hovermode="x unified",
         paper_bgcolor='rgba(0,0,0,0)',
-        plot_bgcolor='rgba(0,0,0,0)'
+        plot_bgcolor='rgba(0,0,0,0)',
+        dragmode=False # Deaktiviert das Greifen/Ziehen im gesamten Chart
     )
 
-    # WICHTIG: fixedrange=False aktiviert das Wischen, Scrollen und Zoomen auf dem Touchscreen
-    fig.update_xaxes(fixedrange=False, showgrid=False)
-    fig.update_yaxes(fixedrange=False, showgrid=True, gridcolor='rgba(255,255,255,0.08)')
+    # Sperrt die Achsen endgültig ab, damit das Wischen auf dem Touchscreen nur die Webseite scrollt
+    fig.update_xaxes(fixedrange=True, showgrid=False)
+    fig.update_yaxes(fixedrange=True, showgrid=True, gridcolor='rgba(255,255,255,0.08)')
 
     with chart_container:
-        st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False})
+        st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False, 'scrollZoom': False})
 
     # ---------------------------------------------------------
-    # 8. DIE 3 ENTSCHEIDUNGSPUNKTE (Klar als Grün/Rot definiert)
+    # 8. DIE 3 ENTSCHEIDUNGSPUNKTE 
     # ---------------------------------------------------------
     st.markdown("---")
     st.markdown("#### Entscheidungs-Metriken")
 
-    # Kriterium 1: Muster-Analyse
     if match_count > 0:
         if success_rate > 55:
             st.success(f"[1] MUSTER-ANALYSE: POSITIV\n\nÄhnliche Bewegungen gab es {match_count}-mal. In {success_rate:.0f}% der Fälle folgte ein Anstieg (Durchschnittlich {avg_future_return:+.1f}%).")
@@ -238,7 +248,6 @@ else:
     else:
         st.info("[1] MUSTER-ANALYSE: UNBEKANNT\n\nKeine exakten historischen Parallelen für diese exakte Bewegung gefunden.")
 
-    # Kriterium 2: Anleger-Psychologie
     if buying_ratio > 55:
         st.success(f"[2] ANLEGER-PSYCHOLOGIE: POSITIV\n\nKaufdruck dominiert. {buying_ratio:.0f}% des Volumens entstand an steigenden Tagen. Anleger kaufen gezielt nach.")
     elif buying_ratio < 45:
@@ -246,7 +255,6 @@ else:
     else:
         st.warning(f"[2] ANLEGER-PSYCHOLOGIE: NEUTRAL\n\nKauf- und Verkaufsdruck halten sich die Waage ({buying_ratio:.0f}% Käuferanteil).")
 
-    # Kriterium 3: Zonen-Abstand (Support / Resistance)
     if dist_to_support_pct < 3.0:
         st.success(f"[3] ZONEN-ABSTAND: POSITIV\n\nKurs ist nahe der Unterstützungslinie bei {support_level:.2f} USD. Starke Chance für Schnäppchenjäger.")
     elif latest_close >= resistance_level * 0.98:
