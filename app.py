@@ -65,8 +65,9 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-# 3. AKTIEN-DATENBANK
+# 3. AKTIEN-DATENBANK & FREIE SUCH-OPTION
 STOCK_DICT = {
+    "🔍 Eigener Ticker (Freie Suche)": "CUSTOM",
     "Apple Inc. (AAPL)": "AAPL",
     "NVIDIA Corporation (NVDA)": "NVDA",
     "Microsoft Corporation (MSFT)": "MSFT",
@@ -74,6 +75,8 @@ STOCK_DICT = {
     "Amazon.com Inc. (AMZN)": "AMZN",
     "Alphabet / Google (GOOGL)": "GOOGL",
     "Meta Platforms (META)": "META",
+    "Palantir Technologies (PLTR)": "PLTR",
+    "Rheinmetall AG (RHM.DE)": "RHM.DE",
     "SAP SE (SAP.DE)": "SAP.DE",
     "Siemens AG (SIE.DE)": "SIE.DE",
     "Allianz SE (ALV.DE)": "ALV.DE",
@@ -83,14 +86,23 @@ STOCK_DICT = {
     "Volkswagen AG (VOW3.DE)": "VOW3.DE"
 }
 
-# 4. SELEKTION
+# 4. SELEKTION / TICKER-SUCHE
 st.markdown("### Aktien-Analyse")
 selected_stock_label = st.selectbox(
     "Aktie auswählen", 
     list(STOCK_DICT.keys()), 
     label_visibility="collapsed"
 )
-ticker_input = STOCK_DICT[selected_stock_label]
+
+if STOCK_DICT[selected_stock_label] == "CUSTOM":
+    custom_ticker = st.text_input(
+        "Yahoo Finance Ticker-Symbol eingeben:",
+        value="PLTR",
+        placeholder="z. B. AAPL, RHM.DE, MSFT, BTC-USD"
+    )
+    ticker_input = custom_ticker.strip().upper()
+else:
+    ticker_input = STOCK_DICT[selected_stock_label]
 
 chart_container = st.container()
 
@@ -121,180 +133,186 @@ chart_type = st.radio(
 )
 
 # 6. DATEN VERARBEITEN
-with st.spinner("Lade Daten..."):
-    stock = yf.Ticker(ticker_input)
-    df = stock.history(period=period, interval=interval)
-
-if df.empty:
-    st.error(f"[FEHLER] Keine Daten für {ticker_input} verfügbar.")
+if not ticker_input:
+    st.info("Bitte gib ein Ticker-Symbol ein.")
 else:
-    # Metriken berechnen
-    latest_close = df['Close'].iloc[-1]
-    first_close = df['Close'].iloc[0]
-    price_change = latest_close - first_close
-    pct_change = (price_change / first_close) * 100
+    with st.spinner(f"Lade Daten für {ticker_input}..."):
+        stock = yf.Ticker(ticker_input)
+        df = stock.history(period=period, interval=interval)
 
-    support_level = df['Low'].min()
-    resistance_level = df['High'].max()
-
-    kpi_col1, kpi_col2 = st.columns(2)
-    kpi_col1.metric("Aktueller Kurs", f"{latest_close:.2f} USD")
-    kpi_col2.metric("Veränderung", f"{price_change:+.2f} USD", f"{pct_change:+.2f}%")
-
-    # ---------------------------------------------------------
-    # ANALYSE-VARIABLEN BERECHNEN
-    # ---------------------------------------------------------
-    lookback = min(5, len(df) - 1)
-    if lookback > 0:
-        recent_move = (df['Close'].iloc[-1] - df['Close'].iloc[-1 - lookback]) / df['Close'].iloc[-1 - lookback]
+    if df.empty:
+        st.error(f"[FEHLER] Keine Daten für Ticker '{ticker_input}' gefunden. Prüfe das Symbol auf Yahoo Finance.")
     else:
-        recent_move = 0.0
+        # Metriken berechnen
+        latest_close = df['Close'].iloc[-1]
+        first_close = df['Close'].iloc[0]
+        price_change = latest_close - first_close
+        pct_change = (price_change / first_close) * 100
 
-    df['Move_N'] = df['Close'].pct_change(lookback)
-    df['Future_Move_N'] = df['Close'].pct_change(lookback).shift(-lookback)
+        support_level = df['Low'].min()
+        resistance_level = df['High'].max()
 
-    historical_data = df.iloc[:-lookback*2].copy() if len(df) > lookback*2 else df.copy()
-    tolerance = 0.025
-    matches = historical_data[
-        (historical_data['Move_N'] >= recent_move - tolerance) & 
-        (historical_data['Move_N'] <= recent_move + tolerance)
-    ]
+        # Währung / Symbol-Info ermitteln falls vorhanden
+        currency = stock.info.get('currency', 'USD') if hasattr(stock, 'info') else 'USD'
 
-    match_count = len(matches)
-    if match_count > 0:
-        positive_outcomes = (matches['Future_Move_N'] > 0).sum()
-        success_rate = (positive_outcomes / match_count) * 100
-        avg_future_return = matches['Future_Move_N'].mean() * 100
-    else:
-        success_rate = 50.0
-        avg_future_return = 0.0
+        kpi_col1, kpi_col2 = st.columns(2)
+        kpi_col1.metric("Aktueller Kurs", f"{latest_close:.2f} {currency}")
+        kpi_col2.metric("Veränderung", f"{price_change:+.2f} {currency}", f"{pct_change:+.2f}%")
 
-    df['Is_Up_Day'] = df['Close'] > df['Open']
-    up_volume = df[df['Is_Up_Day']]['Volume'].sum()
-    down_volume = df[~df['Is_Up_Day']]['Volume'].sum()
-    total_volume = up_volume + down_volume
-
-    buying_ratio = (up_volume / total_volume) * 100 if total_volume > 0 else 50.0
-    dist_to_support_pct = ((latest_close - support_level) / support_level) * 100
-
-    # ---------------------------------------------------------
-    # DYNAMISCHES Y-ACHSEN PADDING
-    # ---------------------------------------------------------
-    y_min = df['Low'].min()
-    y_max = df['High'].max()
-    y_padding = (y_max - y_min) * 0.15
-    if y_padding == 0:
-        y_padding = y_max * 0.05
-    y_range = [y_min - y_padding, y_max + y_padding]
-
-    # ---------------------------------------------------------
-    # 7. CHART AUFBAUEN
-    # ---------------------------------------------------------
-    fig = make_subplots(rows=2, cols=1, shared_xaxes=True, vertical_spacing=0.04, row_heights=[0.78, 0.22])
-
-    if chart_type == "Candlestick":
-        fig.add_trace(go.Candlestick(
-            x=df.index, open=df['Open'], high=df['High'], low=df['Low'], close=df['Close'],
-            name="Kurs", increasing_line_color='#26a69a', decreasing_line_color='#ef5350'
-        ), row=1, col=1)
-    else:
-        # Cleane Linie mit dynamischer Segment-Farbe (Verwendung von .values verhindert KeyError)
-        x_coords = df.index
-        y_coords = df['Close'].values
-        is_up_candle = (df['Close'] >= df['Open']).values
-
-        x_green, y_green = [], []
-        x_red, y_red = [], []
-
-        for i in range(1, len(df)):
-            p1_x, p1_y = x_coords[i-1], y_coords[i-1]
-            p2_x, p2_y = x_coords[i], y_coords[i]
-            
-            if is_up_candle[i]:
-                x_green.extend([p1_x, p2_x, None])
-                y_green.extend([p1_y, p2_y, None])
-            else:
-                x_red.extend([p1_x, p2_x, None])
-                y_red.extend([p1_y, p2_y, None])
-
-        if x_green:
-            fig.add_trace(go.Scatter(
-                x=x_green, y=y_green,
-                mode='lines', name='Steigend',
-                line=dict(color='#26a69a', width=2.5),
-                connectgaps=False
-            ), row=1, col=1)
-
-        if x_red:
-            fig.add_trace(go.Scatter(
-                x=x_red, y=y_red,
-                mode='lines', name='Fallend',
-                line=dict(color='#ef5350', width=2.5),
-                connectgaps=False
-            ), row=1, col=1)
-
-    # Unterstützung & Widerstand
-    fig.add_trace(go.Scatter(
-        x=[df.index[0], df.index[-1]], y=[support_level, support_level],
-        mode='lines', name='Unterstützung', line=dict(color='#81c784', width=1.5, dash='dot')
-    ), row=1, col=1)
-
-    fig.add_trace(go.Scatter(
-        x=[df.index[0], df.index[-1]], y=[resistance_level, resistance_level],
-        mode='lines', name='Widerstand', line=dict(color='#e57373', width=1.5, dash='dot')
-    ), row=1, col=1)
-
-    # Volumen
-    volume_colors = ['#26a69a' if df['Close'].iloc[i] >= df['Open'].iloc[i] else '#ef5350' for i in range(len(df))]
-    fig.add_trace(go.Bar(
-        x=df.index, y=df['Volume'], name="Volumen", marker_color=volume_colors
-    ), row=2, col=1)
-
-    fig.update_layout(
-        height=420,
-        template="plotly_dark",
-        margin=dict(l=5, r=5, t=5, b=5),
-        showlegend=False,
-        xaxis_rangeslider_visible=False,
-        hovermode="x unified",
-        paper_bgcolor='rgba(0,0,0,0)',
-        plot_bgcolor='rgba(0,0,0,0)',
-        dragmode=False
-    )
-
-    fig.update_xaxes(fixedrange=True, showgrid=False)
-    fig.update_yaxes(fixedrange=True, showgrid=True, gridcolor='rgba(255,255,255,0.08)', row=1, col=1, range=y_range)
-    fig.update_yaxes(fixedrange=True, showgrid=False, row=2, col=1)
-
-    with chart_container:
-        st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False, 'scrollZoom': False})
-
-    # ---------------------------------------------------------
-    # 8. DIE 3 ENTSCHEIDUNGSPUNKTE
-    # ---------------------------------------------------------
-    st.markdown("---")
-    st.markdown("#### Entscheidungs-Metriken")
-
-    if match_count > 0:
-        if success_rate > 55:
-            st.success(f"[1] MUSTER-ANALYSE: POSITIV\n\nÄhnliche Bewegungen gab es {match_count}-mal. In {success_rate:.0f}% der Fälle folgte ein Anstieg (Durchschnittlich {avg_future_return:+.1f}%).")
-        elif success_rate < 45:
-            st.error(f"[1] MUSTER-ANALYSE: NEGATIV\n\nÄhnliche Bewegungen gab es {match_count}-mal. In nur {success_rate:.0f}% der Fälle erholte sich der Kurs danach.")
+        # ---------------------------------------------------------
+        # ANALYSE-VARIABLEN BERECHNEN
+        # ---------------------------------------------------------
+        lookback = min(5, len(df) - 1)
+        if lookback > 0:
+            recent_move = (df['Close'].iloc[-1] - df['Close'].iloc[-1 - lookback]) / df['Close'].iloc[-1 - lookback]
         else:
-            st.warning(f"[1] MUSTER-ANALYSE: NEUTRAL\n\nDie Historie zeigt keine klare Richtung bei diesem Muster ({success_rate:.0f}% Erfolgsquote).")
-    else:
-        st.info("[1] MUSTER-ANALYSE: UNBEKANNT\n\nKeine exakten historischen Parallelen für diese exakte Bewegung gefunden.")
+            recent_move = 0.0
 
-    if buying_ratio > 55:
-        st.success(f"[2] ANLEGER-PSYCHOLOGIE: POSITIV\n\nKaufdruck dominiert. {buying_ratio:.0f}% des Volumens entstand an steigenden Tagen. Anleger kaufen gezielt nach.")
-    elif buying_ratio < 45:
-        st.error(f"[2] ANLEGER-PSYCHOLOGIE: NEGATIV\n\nVerkaufsdruck dominiert. {100 - buying_ratio:.0f}% des Volumens entstand an fallenden Tagen. Anleger springen ab.")
-    else:
-        st.warning(f"[2] ANLEGER-PSYCHOLOGIE: NEUTRAL\n\nKauf- und Verkaufsdruck halten sich die Waage ({buying_ratio:.0f}% Käuferanteil).")
+        df['Move_N'] = df['Close'].pct_change(lookback)
+        df['Future_Move_N'] = df['Close'].pct_change(lookback).shift(-lookback)
 
-    if dist_to_support_pct < 3.0:
-        st.success(f"[3] ZONEN-ABSTAND: POSITIV\n\nKurs ist nahe der Unterstützungslinie bei {support_level:.2f} USD. Starke Chance für Schnäppchenjäger.")
-    elif latest_close >= resistance_level * 0.98:
-        st.error(f"[3] ZONEN-ABSTAND: NEGATIV\n\nKurs ist am oberen Widerstand bei {resistance_level:.2f} USD. Gefahr von starken Gewinnmitnahmen.")
-    else:
-        st.warning(f"[3] ZONEN-ABSTAND: NEUTRAL\n\nKurs bewegt sich im unsicheren Mittelfeld (Abstand zur Untergrenze: {dist_to_support_pct:.1f}%).")
+        historical_data = df.iloc[:-lookback*2].copy() if len(df) > lookback*2 else df.copy()
+        tolerance = 0.025
+        matches = historical_data[
+            (historical_data['Move_N'] >= recent_move - tolerance) & 
+            (historical_data['Move_N'] <= recent_move + tolerance)
+        ]
+
+        match_count = len(matches)
+        if match_count > 0:
+            positive_outcomes = (matches['Future_Move_N'] > 0).sum()
+            success_rate = (positive_outcomes / match_count) * 100
+            avg_future_return = matches['Future_Move_N'].mean() * 100
+        else:
+            success_rate = 50.0
+            avg_future_return = 0.0
+
+        df['Is_Up_Day'] = df['Close'] > df['Open']
+        up_volume = df[df['Is_Up_Day']]['Volume'].sum()
+        down_volume = df[~df['Is_Up_Day']]['Volume'].sum()
+        total_volume = up_volume + down_volume
+
+        buying_ratio = (up_volume / total_volume) * 100 if total_volume > 0 else 50.0
+        dist_to_support_pct = ((latest_close - support_level) / support_level) * 100
+
+        # ---------------------------------------------------------
+        # DYNAMISCHES Y-ACHSEN PADDING
+        # ---------------------------------------------------------
+        y_min = df['Low'].min()
+        y_max = df['High'].max()
+        y_padding = (y_max - y_min) * 0.15
+        if y_padding == 0:
+            y_padding = y_max * 0.05
+        y_range = [y_min - y_padding, y_max + y_padding]
+
+        # ---------------------------------------------------------
+        # 7. CHART AUFBAUEN
+        # ---------------------------------------------------------
+        fig = make_subplots(rows=2, cols=1, shared_xaxes=True, vertical_spacing=0.04, row_heights=[0.78, 0.22])
+
+        if chart_type == "Candlestick":
+            fig.add_trace(go.Candlestick(
+                x=df.index, open=df['Open'], high=df['High'], low=df['Low'], close=df['Close'],
+                name="Kurs", increasing_line_color='#26a69a', decreasing_line_color='#ef5350'
+            ), row=1, col=1)
+        else:
+            # Cleane Linie mit dynamischer Segment-Farbe (Verwendung von .values verhindert KeyError)
+            x_coords = df.index
+            y_coords = df['Close'].values
+            is_up_candle = (df['Close'] >= df['Open']).values
+
+            x_green, y_green = [], []
+            x_red, y_red = [], []
+
+            for i in range(1, len(df)):
+                p1_x, p1_y = x_coords[i-1], y_coords[i-1]
+                p2_x, p2_y = x_coords[i], y_coords[i]
+                
+                if is_up_candle[i]:
+                    x_green.extend([p1_x, p2_x, None])
+                    y_green.extend([p1_y, p2_y, None])
+                else:
+                    x_red.extend([p1_x, p2_x, None])
+                    y_red.extend([p1_y, p2_y, None])
+
+            if x_green:
+                fig.add_trace(go.Scatter(
+                    x=x_green, y=y_green,
+                    mode='lines', name='Steigend',
+                    line=dict(color='#26a69a', width=2.5),
+                    connectgaps=False
+                ), row=1, col=1)
+
+            if x_red:
+                fig.add_trace(go.Scatter(
+                    x=x_red, y=y_red,
+                    mode='lines', name='Fallend',
+                    line=dict(color='#ef5350', width=2.5),
+                    connectgaps=False
+                ), row=1, col=1)
+
+        # Unterstützung & Widerstand
+        fig.add_trace(go.Scatter(
+            x=[df.index[0], df.index[-1]], y=[support_level, support_level],
+            mode='lines', name='Unterstützung', line=dict(color='#81c784', width=1.5, dash='dot')
+        ), row=1, col=1)
+
+        fig.add_trace(go.Scatter(
+            x=[df.index[0], df.index[-1]], y=[resistance_level, resistance_level],
+            mode='lines', name='Widerstand', line=dict(color='#e57373', width=1.5, dash='dot')
+        ), row=1, col=1)
+
+        # Volumen
+        volume_colors = ['#26a69a' if df['Close'].iloc[i] >= df['Open'].iloc[i] else '#ef5350' for i in range(len(df))]
+        fig.add_trace(go.Bar(
+            x=df.index, y=df['Volume'], name="Volumen", marker_color=volume_colors
+        ), row=2, col=1)
+
+        fig.update_layout(
+            height=420,
+            template="plotly_dark",
+            margin=dict(l=5, r=5, t=5, b=5),
+            showlegend=False,
+            xaxis_rangeslider_visible=False,
+            hovermode="x unified",
+            paper_bgcolor='rgba(0,0,0,0)',
+            plot_bgcolor='rgba(0,0,0,0)',
+            dragmode=False
+        )
+
+        fig.update_xaxes(fixedrange=True, showgrid=False)
+        fig.update_yaxes(fixedrange=True, showgrid=True, gridcolor='rgba(255,255,255,0.08)', row=1, col=1, range=y_range)
+        fig.update_yaxes(fixedrange=True, showgrid=False, row=2, col=1)
+
+        with chart_container:
+            st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False, 'scrollZoom': False})
+
+        # ---------------------------------------------------------
+        # 8. DIE 3 ENTSCHEIDUNGSPUNKTE
+        # ---------------------------------------------------------
+        st.markdown("---")
+        st.markdown("#### Entscheidungs-Metriken")
+
+        if match_count > 0:
+            if success_rate > 55:
+                st.success(f"[1] MUSTER-ANALYSE: POSITIV\n\nÄhnliche Bewegungen gab es {match_count}-mal. In {success_rate:.0f}% der Fälle folgte ein Anstieg (Durchschnittlich {avg_future_return:+.1f}%).")
+            elif success_rate < 45:
+                st.error(f"[1] MUSTER-ANALYSE: NEGATIV\n\nÄhnliche Bewegungen gab es {match_count}-mal. In nur {success_rate:.0f}% der Fälle erholte sich der Kurs danach.")
+            else:
+                st.warning(f"[1] MUSTER-ANALYSE: NEUTRAL\n\nDie Historie zeigt keine klare Richtung bei diesem Muster ({success_rate:.0f}% Erfolgsquote).")
+        else:
+            st.info("[1] MUSTER-ANALYSE: UNBEKANNT\n\nKeine exakten historischen Parallelen für diese exakte Bewegung gefunden.")
+
+        if buying_ratio > 55:
+            st.success(f"[2] ANLEGER-PSYCHOLOGIE: POSITIV\n\nKaufdruck dominiert. {buying_ratio:.0f}% des Volumens entstand an steigenden Tagen. Anleger kaufen gezielt nach.")
+        elif buying_ratio < 45:
+            st.error(f"[2] ANLEGER-PSYCHOLOGIE: NEGATIV\n\nVerkaufsdruck dominiert. {100 - buying_ratio:.0f}% des Volumens entstand an fallenden Tagen. Anleger springen ab.")
+        else:
+            st.warning(f"[2] ANLEGER-PSYCHOLOGIE: NEUTRAL\n\nKauf- und Verkaufsdruck halten sich die Waage ({buying_ratio:.0f}% Käuferanteil).")
+
+        if dist_to_support_pct < 3.0:
+            st.success(f"[3] ZONEN-ABSTAND: POSITIV\n\nKurs ist nahe der Unterstützungslinie bei {support_level:.2f} {currency}. Starke Chance für Schnäppchenjäger.")
+        elif latest_close >= resistance_level * 0.98:
+            st.error(f"[3] ZONEN-ABSTAND: NEGATIV\n\nKurs ist am oberen Widerstand bei {resistance_level:.2f} {currency}. Gefahr von starken Gewinnmitnahmen.")
+        else:
+            st.warning(f"[3] ZONEN-ABSTAND: NEUTRAL\n\nKurs bewegt sich im unsicheren Mittelfeld (Abstand zur Untergrenze: {dist_to_support_pct:.1f}%).")
